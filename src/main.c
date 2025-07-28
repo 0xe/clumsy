@@ -1,11 +1,14 @@
+#include <stdbool.h>
 #include "types.h"
 #include "tokenizer.h"
 #include "parser.h"
 #include "compiler.h"
 
 void usage(const char *program_name) {
-    fprintf(stderr, "Usage: %s <source_file>\n", program_name);
+    fprintf(stderr, "Usage: %s [--ast] <source_file>\n", program_name);
     fprintf(stderr, "Compiles Cimple source code to ARM64 assembly\n");
+    fprintf(stderr, "Options:\n");
+    fprintf(stderr, "  --ast    Print the Abstract Syntax Tree and exit\n");
     exit(1);
 }
 
@@ -37,11 +40,23 @@ char *read_file(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 2) {
-        usage(argv[0]);
+    bool print_ast_flag = false;
+    const char *source_file = NULL;
+    
+    // Parse command line arguments
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--ast") == 0) {
+            print_ast_flag = true;
+        } else if (source_file == NULL) {
+            source_file = argv[i];
+        } else {
+            usage(argv[0]);
+        }
     }
     
-    const char *source_file = argv[1];
+    if (source_file == NULL) {
+        usage(argv[0]);
+    }
     
     // Read source file
     char *source_code = read_file(source_file);
@@ -61,6 +76,18 @@ int main(int argc, char *argv[]) {
         free_token_array(tokens);
         free(source_code);
         exit(1);
+    }
+    
+    // If --ast flag is set, print AST and exit
+    if (print_ast_flag) {
+        printf("Abstract Syntax Tree:\n");
+        print_ast(ast, 0);
+        
+        // Cleanup and exit
+        free_ast(ast);
+        free_token_array(tokens);
+        free(source_code);
+        return 0;
     }
     
     // Build symbol table

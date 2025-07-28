@@ -49,6 +49,16 @@ test: $(TARGET)
 						echo "FAIL (output mismatch)"; \
 						failed=$$((failed + 1)); \
 					fi; \
+				elif [ -f $(TESTDIR)/$$testname.expected_exit_code ]; then \
+					$(TMPDIR)/$$testname >/dev/null 2>&1; \
+					actual_exit_code=$$?; \
+					expected_exit_code=$$(cat $(TESTDIR)/$$testname.expected_exit_code); \
+					if [ $$actual_exit_code -eq $$expected_exit_code ]; then \
+						echo "PASS"; \
+					else \
+						echo "FAIL (exit code mismatch: expected $$expected_exit_code, got $$actual_exit_code)"; \
+						failed=$$((failed + 1)); \
+					fi; \
 				else \
 					if $(TMPDIR)/$$testname >/dev/null 2>&1; then \
 						echo "PASS"; \

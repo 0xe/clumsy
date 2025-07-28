@@ -87,30 +87,40 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
                 if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
                     // Variable declaration
                     ASTNode *name_node = stmt->data.list.children[1];
-                    ASTNode *type_node = stmt->data.list.children[2];
                     
                     if (name_node->type == AST_IDENTIFIER) {
                         Symbol symbol;
                         symbol.name = strdup(name_node->data.string_value);
                         
-                        // Parse type
-                        if (type_node->type == AST_IDENTIFIER) {
-                            if (strcmp(type_node->data.string_value, "int") == 0) {
-                                symbol.type = SYM_INT;
-                            } else if (strcmp(type_node->data.string_value, "str") == 0) {
-                                symbol.type = SYM_STR;
-                            } else if (strcmp(type_node->data.string_value, "char") == 0) {
-                                symbol.type = SYM_CHAR;
-                            } else if (strcmp(type_node->data.string_value, "bool") == 0) {
-                                symbol.type = SYM_BOOL;
-                            } else {
-                                symbol.type = SYM_INT; // default
-                            }
-                        } else if (type_node->type == AST_LIST && type_node->data.list.count >= 2) {
-                            // Handle array types: (array_type int 4)
-                            ASTNode *array_op = type_node->data.list.children[0];
-                            if (array_op->type == AST_IDENTIFIER && strcmp(array_op->data.string_value, "array_type") == 0) {
-                                symbol.type = SYM_INT; // For now, treat arrays as int (simplified)
+                        // Determine if this is 3-element (let name value) or 4-element (let name type value) format
+                        if (stmt->data.list.count == 3) {
+                            // 3-element format: (let name value) - infer type from value
+                            symbol.type = SYM_INT; // default type for 3-element format
+                        } else if (stmt->data.list.count >= 4) {
+                            // 4-element format: (let name type value) - explicit type
+                            ASTNode *type_node = stmt->data.list.children[2];
+                            
+                            // Parse type
+                            if (type_node->type == AST_IDENTIFIER) {
+                                if (strcmp(type_node->data.string_value, "int") == 0) {
+                                    symbol.type = SYM_INT;
+                                } else if (strcmp(type_node->data.string_value, "str") == 0) {
+                                    symbol.type = SYM_STR;
+                                } else if (strcmp(type_node->data.string_value, "char") == 0) {
+                                    symbol.type = SYM_CHAR;
+                                } else if (strcmp(type_node->data.string_value, "bool") == 0) {
+                                    symbol.type = SYM_BOOL;
+                                } else {
+                                    symbol.type = SYM_INT; // default
+                                }
+                            } else if (type_node->type == AST_LIST && type_node->data.list.count >= 2) {
+                                // Handle array types: (array_type int 4)
+                                ASTNode *array_op = type_node->data.list.children[0];
+                                if (array_op->type == AST_IDENTIFIER && strcmp(array_op->data.string_value, "array_type") == 0) {
+                                    symbol.type = SYM_INT; // For now, treat arrays as int (simplified)
+                                } else {
+                                    symbol.type = SYM_INT; // default
+                                }
                             } else {
                                 symbol.type = SYM_INT; // default
                             }
@@ -237,11 +247,10 @@ void generate_pow_function(CodeGen *codegen) {
         "    \n"
         "    // Main exponentiation loop\n"
         "pow_loop:\n"
-        "    // If exponent is 1, we're done\n"
-        "    cmp x3, #1\n"
-        "    beq pow_done\n"
+        "    // If exponent is 0, we're done\n"
+        "    cbz x3, pow_done\n"
         "    \n"
-        "    // Check if exponent is even\n"
+        "    // Check if exponent is odd\n"
         "    tbnz x3, #0, pow_odd\n"
         "    \n"
         "    // Exponent is even: square the base, halve the exponent\n"
@@ -252,11 +261,10 @@ void generate_pow_function(CodeGen *codegen) {
         "pow_odd:\n"
         "    // Multiply result by current base\n"
         "    mul x0, x0, x2\n"
-        "    // Square the base, halve the exponent (minus 1)\n"
-        "    mul x2, x2, x2\n"
-        "    lsr x3, x3, #1\n"
-        "    cbnz x3, pow_loop\n"
-        "    b pow_done\n"
+        "    // Decrement exponent by 1\n"
+        "    sub x3, x3, #1\n"
+        "    // Continue with the loop\n"
+        "    b pow_loop\n"
         "    \n"
         "pow_zero:\n"
         "    mov x0, #0\n"
@@ -487,13 +495,18 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
     }
     
     if (strcmp(op->data.string_value, "let") == 0) {
-        // Variable declaration: (let name type [init])
+        // Variable declaration: (let name type [init]) or (let name value)
         if (stmt->data.list.count >= 3) {
             ASTNode *name_node = stmt->data.list.children[1];
             
             if (stmt->data.list.count >= 4) {
-                // Has initializer
+                // 4-element format: (let name type init)
                 ASTNode *init = stmt->data.list.children[3];
+                generate_expression(codegen, init, symbols);
+                emit_store_variable(codegen, "x0", name_node->data.string_value, symbols);
+            } else if (stmt->data.list.count == 3) {
+                // 3-element format: (let name value)
+                ASTNode *init = stmt->data.list.children[2];
                 generate_expression(codegen, init, symbols);
                 emit_store_variable(codegen, "x0", name_node->data.string_value, symbols);
             } else {
@@ -717,6 +730,8 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
     }
     
     // Generate code for each statement (skip function definitions)
+    // Also find the final expression to use as exit code
+    ASTNode *final_expr = NULL;
     if (ast->type == AST_LIST) {
         for (size_t i = 0; i < ast->data.list.count; i++) {
             ASTNode *stmt = ast->data.list.children[i];
@@ -739,12 +754,27 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
             
             if (!is_function_def) {
                 generate_statement(codegen, stmt, symbols);
+                // If this is not a statement (no operator), it's an expression for exit code
+                if (stmt->type == AST_IDENTIFIER || stmt->type == AST_INT || 
+                    (stmt->type == AST_LIST && stmt->data.list.count > 0 && 
+                     stmt->data.list.children[0]->type == AST_IDENTIFIER &&
+                     (strcmp(stmt->data.list.children[0]->data.string_value, "let") != 0 &&
+                      strcmp(stmt->data.list.children[0]->data.string_value, "set") != 0 &&
+                      strcmp(stmt->data.list.children[0]->data.string_value, "print") != 0 &&
+                      strcmp(stmt->data.list.children[0]->data.string_value, "if") != 0 &&
+                      strcmp(stmt->data.list.children[0]->data.string_value, "while") != 0))) {
+                    final_expr = stmt;
+                }
             }
         }
     }
     
-    // Set exit code to result variable's value (factorial result)
-    emit_load_variable(codegen, "x0", "result", symbols);
+    // Set exit code based on final expression or default to 0
+    if (final_expr) {
+        generate_expression(codegen, final_expr, symbols);
+    } else {
+        emit_mov_immediate(codegen, "x0", 0);
+    }
     
     // Deallocate stack space
     if (stack_space > 0) {

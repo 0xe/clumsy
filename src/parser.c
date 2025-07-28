@@ -363,3 +363,40 @@ void free_ast(ASTNode *node) {
     
     free(node);
 }
+
+void print_ast(ASTNode *node, int indent) {
+    if (!node) {
+        printf("%*sNULL\n", indent, "");
+        return;
+    }
+    
+    switch (node->type) {
+        case AST_INT:
+            printf("%*sINT: %d\n", indent, "", node->data.int_value);
+            break;
+        case AST_CHAR:
+            printf("%*sCHAR: '%c'\n", indent, "", node->data.char_value);
+            break;
+        case AST_IDENTIFIER:
+            printf("%*sIDENTIFIER: %s\n", indent, "", node->data.string_value);
+            break;
+        case AST_STRING:
+            printf("%*sSTRING: \"%s\"\n", indent, "", node->data.string_value);
+            break;
+        case AST_LIST:
+            printf("%*sLIST (%zu children):\n", indent, "", node->data.list.count);
+            for (size_t i = 0; i < node->data.list.count; i++) {
+                print_ast(node->data.list.children[i], indent + 2);
+            }
+            break;
+        case AST_ARRAY:
+            printf("%*sARRAY (%zu elements):\n", indent, "", node->data.list.count);
+            for (size_t i = 0; i < node->data.list.count; i++) {
+                print_ast(node->data.list.children[i], indent + 2);
+            }
+            break;
+        default:
+            printf("%*sUNKNOWN TYPE: %d\n", indent, "", node->type);
+            break;
+    }
+}

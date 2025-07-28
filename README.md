@@ -113,3 +113,10 @@ k.d1.b
 
 ## BUGS
 
+## TODO
+
+Here's what I hope to accomplish today:
+
+1. Go through the list of items that are marked as working in the # Progress section in the README and verify if they actually work with a test case in tests/
+2. Implement missing pieces to ensure things are working correctly
+3. Go thorough the code for each feature (eg: function calls): parser/code generator and understand how they fit together

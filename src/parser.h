@@ -27,4 +27,7 @@ Token *peek_token(Parser *parser);
 bool match_token(Parser *parser, TokenType type);
 bool match_value(Parser *parser, const char *value);
 
+// Debug utilities
+void print_ast(ASTNode *node, int indent);
+
 #endif // PARSER_H
