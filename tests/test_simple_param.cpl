@@ -1,0 +1,3 @@
+(let hello (fn [x] x))
+(let result int (hello 42))
+result

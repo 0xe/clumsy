@@ -5,6 +5,7 @@ CFLAGS = -Wall -Wextra -std=c99 -g -O2
 TARGET = clumsyc
 SRCDIR = src
 TESTDIR = tests
+TMPDIR = tmp
 SOURCES = $(SRCDIR)/main.c $(SRCDIR)/tokenizer.c $(SRCDIR)/parser.c $(SRCDIR)/compiler.c
 OBJECTS = $(SOURCES:.c=.o)
 HEADERS = $(SRCDIR)/types.h $(SRCDIR)/tokenizer.h $(SRCDIR)/parser.h $(SRCDIR)/compiler.h
@@ -25,31 +26,31 @@ $(TARGET): $(OBJECTS)
 clean:
 	rm -f $(OBJECTS) $(TARGET)
 	rm -f *.s *.out test_output
-	rm -f $(TESTDIR)/*.s $(TESTDIR)/*.o $(TESTDIR)/*.actual
-	rm -f $(TESTDIR)/test_*[!.cpl][!.expected]
+	rm -rf $(TMPDIR)
 
 test: $(TARGET)
 	@echo "Running compiler tests..."
+	@mkdir -p $(TMPDIR)
 	@failed=0; total=0; \
 	for test in $(TESTS); do \
 		total=$$((total + 1)); \
 		testname=$$(basename $$test .cpl); \
 		echo -n "Testing $$testname... "; \
 		\
-		if ./$(TARGET) $$test > $(TESTDIR)/$$testname.s 2>/dev/null; then \
-			if as -o $(TESTDIR)/$$testname.o $(TESTDIR)/$$testname.s 2>/dev/null && \
-			   ld -o $(TESTDIR)/$$testname $(TESTDIR)/$$testname.o -lSystem \
+		if ./$(TARGET) $$test > $(TMPDIR)/$$testname.s 2>/dev/null; then \
+			if as -o $(TMPDIR)/$$testname.o $(TMPDIR)/$$testname.s 2>/dev/null && \
+			   ld -o $(TMPDIR)/$$testname $(TMPDIR)/$$testname.o -lSystem \
 			      -syslibroot `xcrun -sdk macosx --show-sdk-path` -e _main 2>/dev/null; then \
 				if [ -f $(TESTDIR)/$$testname.expected ]; then \
-					$(TESTDIR)/$$testname > $(TESTDIR)/$$testname.actual 2>/dev/null; \
-					if diff -q $(TESTDIR)/$$testname.expected $(TESTDIR)/$$testname.actual >/dev/null 2>&1; then \
+					$(TMPDIR)/$$testname > $(TMPDIR)/$$testname.actual 2>/dev/null; \
+					if diff -q $(TESTDIR)/$$testname.expected $(TMPDIR)/$$testname.actual >/dev/null 2>&1; then \
 						echo "PASS"; \
 					else \
 						echo "FAIL (output mismatch)"; \
 						failed=$$((failed + 1)); \
 					fi; \
 				else \
-					if $(TESTDIR)/$$testname >/dev/null 2>&1; then \
+					if $(TMPDIR)/$$testname >/dev/null 2>&1; then \
 						echo "PASS"; \
 					else \
 						echo "FAIL (runtime error)"; \

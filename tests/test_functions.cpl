@@ -1,0 +1,7 @@
+(fn add (a b) (+ a b))
+(fn multiply (x y) (* x y))
+(fn square (n) (multiply n n))
+
+(let result (add 5 3))
+(let squared (square 4))
+(+ result squared)
