@@ -39,10 +39,10 @@ test: $(TARGET)
 		\
 		if ./$(TARGET) $$test > $(TMPDIR)/$$testname.s 2>/dev/null; then \
 			if as -o $(TMPDIR)/$$testname.o $(TMPDIR)/$$testname.s 2>/dev/null && \
-			   ld -o $(TMPDIR)/$$testname $(TMPDIR)/$$testname.o -lSystem \
+			   ld -o $(TMPDIR)/$$testname.x $(TMPDIR)/$$testname.o -lSystem \
 			      -syslibroot `xcrun -sdk macosx --show-sdk-path` -e _main 2>/dev/null; then \
 				if [ -f $(TESTDIR)/$$testname.expected ]; then \
-					$(TMPDIR)/$$testname > $(TMPDIR)/$$testname.actual 2>/dev/null; \
+					$(TMPDIR)/$$testname.x > $(TMPDIR)/$$testname.actual 2>/dev/null; \
 					if diff -q $(TESTDIR)/$$testname.expected $(TMPDIR)/$$testname.actual >/dev/null 2>&1; then \
 						echo "PASS"; \
 					else \
@@ -50,7 +50,7 @@ test: $(TARGET)
 						failed=$$((failed + 1)); \
 					fi; \
 				elif [ -f $(TESTDIR)/$$testname.expected_exit_code ]; then \
-					$(TMPDIR)/$$testname >/dev/null 2>&1; \
+					$(TMPDIR)/$$testname.x >/dev/null 2>&1; \
 					actual_exit_code=$$?; \
 					expected_exit_code=$$(cat $(TESTDIR)/$$testname.expected_exit_code); \
 					if [ $$actual_exit_code -eq $$expected_exit_code ]; then \
@@ -60,7 +60,7 @@ test: $(TARGET)
 						failed=$$((failed + 1)); \
 					fi; \
 				else \
-					if $(TMPDIR)/$$testname >/dev/null 2>&1; then \
+					if $(TMPDIR)/$$testname.x >/dev/null 2>&1; then \
 						echo "PASS"; \
 					else \
 						echo "FAIL (runtime error)"; \
