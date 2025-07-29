@@ -1,2 +1,2 @@
 (let x int 42)
-x
+(print x)
