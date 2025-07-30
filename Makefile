@@ -38,7 +38,7 @@ test: $(TARGET)
 		echo -n "Testing $$testname... "; \
 		\
 		if ./$(TARGET) $$test > $(TMPDIR)/$$testname.s 2>/dev/null; then \
-			if clang -o $(TMPDIR)/$$testname.x $(TMPDIR)/$$testname.s 2>/dev/null; then \
+			if clang -o $(TMPDIR)/$$testname.x $(TMPDIR)/$$testname.s $(SRCDIR)/print_helpers.o 2>/dev/null; then \
 				if [ -f $(TESTDIR)/$$testname.expected ]; then \
 					$(TMPDIR)/$$testname.x > $(TMPDIR)/$$testname.actual 2>/dev/null; \
 					if diff -q $(TESTDIR)/$$testname.expected $(TMPDIR)/$$testname.actual >/dev/null 2>&1; then \

@@ -529,22 +529,17 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
         if (stmt->data.list.count >= 2) {
             ASTNode *expr = stmt->data.list.children[1];
             generate_expression(codegen, expr, symbols);
-            emit_code(codegen, "    mov   x1, x0\n");  // Move value to x1
             
-            // Choose format string based on expression type
+            // Call appropriate print helper function
+            // The value is already in x0 (first argument register)
             if (expr->type == AST_STRING) {
-                emit_code(codegen, "    adrp  x0, Lfmtstr@PAGE\n");
-                emit_code(codegen, "    add   x0, x0, Lfmtstr@PAGEOFF\n");
+                emit_code(codegen, "    bl    _print_str\n");
             } else if (expr->type == AST_CHAR) {
-                emit_code(codegen, "    adrp  x0, Lfmtchar@PAGE\n");
-                emit_code(codegen, "    add   x0, x0, Lfmtchar@PAGEOFF\n");
+                emit_code(codegen, "    bl    _print_char\n");
             } else {
                 // Default to integer format
-                emit_code(codegen, "    adrp  x0, Lfmtint@PAGE\n");
-                emit_code(codegen, "    add   x0, x0, Lfmtint@PAGEOFF\n");
+                emit_code(codegen, "    bl    _print_int\n");
             }
-            
-            emit_code(codegen, "    bl    _printf\n");
         }
     } else if (strcmp(op->data.string_value, "if") == 0) {
         // If statement: (if condition then-branch [else-branch])
@@ -844,14 +839,7 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols) {
     
     generate_main_function(codegen, ast, symbols);
     
-    // Add format strings for printf
-    emit_code(codegen, ".section __TEXT,__cstring\n");
-    emit_code(codegen, "Lfmtint:\n");
-    emit_code(codegen, "    .asciz \"%%ld\\n\"\n");
-    emit_code(codegen, "Lfmtstr:\n");
-    emit_code(codegen, "    .asciz \"%%s\\n\"\n");
-    emit_code(codegen, "Lfmtchar:\n");
-    emit_code(codegen, "    .asciz \"%%c\\n\"\n");
+    // No longer need format strings since we use print helper functions
     
     char *result = strdup(codegen->output);
     free_codegen(codegen);
