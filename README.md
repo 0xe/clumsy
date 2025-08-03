@@ -108,9 +108,8 @@ something.initial
 
 ### bugs
 
-- broken functions, arrays and structs
+- broken recursive functions
 - simpler struct and function declaration syntax
-
 
 ### features
 - null type, void type

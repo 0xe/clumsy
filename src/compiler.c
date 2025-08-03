@@ -599,8 +599,77 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             // Restore link register
                             emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
                         } else {
-                            // Unknown function or identifier, return 0
-                            emit_mov_immediate(codegen, "x0", 0);
+                            // Check if this might be a global function call even if not in local symbol table
+                            // Only treat it as a function call if:
+                            // 1. It has arguments, AND
+                            // 2. It's not a special keyword like "fn", "ret", "let", etc.
+                            const char *func_name = op->data.string_value;
+                            if (expr->data.list.count > 1 && 
+                                strcmp(func_name, "fn") != 0 &&
+                                strcmp(func_name, "ret") != 0 &&
+                                strcmp(func_name, "let") != 0 &&
+                                strcmp(func_name, "if") != 0 &&
+                                strcmp(func_name, "while") != 0 &&
+                                strcmp(func_name, "begin") != 0 &&
+                                strcmp(func_name, "set") != 0 &&
+                                strcmp(func_name, "print") != 0 &&
+                                strcmp(func_name, "+") != 0 &&
+                                strcmp(func_name, "-") != 0 &&
+                                strcmp(func_name, "*") != 0 &&
+                                strcmp(func_name, "/") != 0 &&
+                                strcmp(func_name, "%") != 0 &&
+                                strcmp(func_name, "**") != 0 &&
+                                strcmp(func_name, "==") != 0 &&
+                                strcmp(func_name, "<") != 0 &&
+                                strcmp(func_name, ">") != 0 &&
+                                strcmp(func_name, "<=") != 0 &&
+                                strcmp(func_name, ">=") != 0 &&
+                                strcmp(func_name, "[]") != 0 &&
+                                strcmp(func_name, ".") != 0 &&
+                                strcmp(func_name, "#") != 0) {
+                                // Generate function call assuming it's a global function
+                                emit_code(codegen, "    // Function call: %s\n", op->data.string_value);
+                                
+                                // Save link register
+                                emit_code(codegen, "    stp   x29, x30, [sp, #-16]!\n");
+                                
+                                // Pass arguments
+                                int arg_count = expr->data.list.count - 1; // Subtract 1 for function name
+                                int reg_index = 0;
+                                
+                                for (int i = 0; i < arg_count && reg_index < 4; i++) {
+                                    ASTNode *arg = expr->data.list.children[i + 1];
+                                    if (arg->type == AST_INT) {
+                                        emit_mov_immediate(codegen, "x9", arg->data.int_value);
+                                        emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                        reg_index++;
+                                    } else if (arg->type == AST_IDENTIFIER) {
+                                        // Load variable (parameter or local)
+                                        // Need to account for the stack pointer movement due to stp instruction
+                                        int arg_offset = get_symbol_offset(symbols, arg->data.string_value);
+                                        if (arg_offset >= 0) {
+                                            // Add 16 to offset to account for saved registers
+                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", arg_offset + 16);
+                                        } else {
+                                            emit_mov_immediate(codegen, "x9", 0);
+                                        }
+                                        emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                        reg_index++;
+                                    } else if (arg->type == AST_LIST) {
+                                        generate_expression(codegen, arg, symbols);
+                                        emit_code(codegen, "    mov   x%d, x0\n", reg_index);
+                                        reg_index++;
+                                    }
+                                }
+                                
+                                emit_code(codegen, "    bl    %s\n", op->data.string_value);
+                                
+                                // Restore link register
+                                emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
+                            } else {
+                                // Unknown identifier, return 0
+                                emit_mov_immediate(codegen, "x0", 0);
+                            }
                         }
                     }
                 }
