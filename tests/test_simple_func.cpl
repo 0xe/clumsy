@@ -1,1 +1,0 @@
-(let hello (fn [] int (ret 42)))

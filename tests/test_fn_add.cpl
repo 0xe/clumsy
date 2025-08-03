@@ -1,0 +1,3 @@
+(let add (fn [(a int) (b int)] int (+ a b)))
+(let result (add 5 3))
+(print result)

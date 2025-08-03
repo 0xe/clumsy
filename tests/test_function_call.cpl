@@ -1,3 +1,0 @@
-(let add (fn [a b] (+ a b)))
-(let result int (add 5 3))
-result

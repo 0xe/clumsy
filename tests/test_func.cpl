@@ -1,2 +1,0 @@
-(let add (fn [(a int) (b int)] int (ret (+ a b))))
-(print (add 5 3))

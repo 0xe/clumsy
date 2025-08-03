@@ -1,34 +1,48 @@
-A few experiments in language implementation.
-A simple lisp-like language that's statically typed and compiles to native code.
+A language that's statically typed and compiles to native code.
+
+- basic types: string, int, characters, arrays, pointers
+- compound types: structs 
+- branching: loops, decisions, functions
+- std library: print, clock, ...
+- call any c/asm function: c-interop
 
 ## Syntax
 
 ```
-// LET name type init
-(let y bool)
-(let x int 123)
-(let z str "hello world\n")
-(let a char #\q)
-(let b int[4] [1 2 3 4])
-b[2]
-(let c struct 
-    #((a int 356)
-      (b char #\c)))
+// variable initialization with optional initializer
+(let shouldPrint bool)
+(let age int 123)
+(let welcome str "hello world\n")
+(let initial char #\q)
+(let greeting *str &welcome)
 
-// SET name value
-(set a #\r)
+// arrays
+(let firstNaturalNumbers int[4] [1 2 3 4])
+firstNaturalNumbers[2]
+
+// structs
+// TODO: (struct amoundAndInitial...)
+(let amountAndInitial struct 
+    #((amount int 356)
+      (initial char #\c)))
+
+// variable mutation
+(set initial #\r)
 (let getA 
-    (fn () 
+    (fn getA () 
         char
         (begin
             // ...
             (ret #\s))))
-            
-(set a (getA))
-(let d struct
-  #((d1 c (789 #\e))))
+(set initial (getA))
+
+// nested structures
+(let nestedInitial struct
+  #((amI amountAndInitial (789 #\e))))
   
-(let e 
+// functions
+// TODO: (fn functionExample ...)
+(let functionExample 
     (fn
         [(p1 int)
          (p2 str)
@@ -39,32 +53,32 @@ b[2]
             (ret (* p1 p3[4])))))
       
 // C-interop - TODO
-(let puts 
-    (fn
-      [(in str)]
-    void)) // no body, just a declaration
+// (let puts 
+//    (fn
+//      [(in str)]
+//    void)) // no body, just a declaration
     
 // FUNCTION CALL
-(e 12 "hello" [1 3 5 7 9 11 13 15 17 19])
+(functionExample 12 "hello" [1 3 5 7 9 11 13 15 17 19])
 
 // CONDITION
-(if (== x 123)
+(if (== age 123)
   // do something
-  (print x)
+  (print age)
 
   // do something else
   (print 123))
 
 // LOOP
-(while (<= x 142)
-  (set x (+ x 1))
+(while (<= age 142)
+  (set age (+ age 1))
   // do something
   )
 
 // PROPERTY access from structs
-(let k d #(211 #\f))
-k.d1.a
-k.d1.b
+(let something amountAndInitial #(211 #\f))
+something.amount
+something.initial
 ```
 
 ## Implementations
@@ -75,37 +89,52 @@ k.d1.b
 
   | Feature                 | Compiler (ARM64) | Compiler (x86) |
   |-------------------------|------------------|----------------|
-  | Basic Variables         | ✅               |                |
-  | Arithmetic (+,-,\*,/)   | ✅               |                |
-  | Modulo (%)              | ✅               |                |
-  | Exponentiation (**)     | ✅               |                |
-  | Comparisons             | ✅               |                |
-  | Arrays                  | ✅               |                |
-  | Control Flow (if/while) | ✅               |                |
-  | Print Statements        | ✅               |                |
-  | Function Definitions    | ✅               |                |
-  | Function Calls          | ✅               |                |
-  | Structs                 | ✅               |                |
-  | Property Access (.)     | ✅               |                |
-  | C-Interop               | ❌               |                |
+  | Basic Variables         | ✅                |                |
+  | Arithmetic (+,-,\*,/)   | ✅                |                |
+  | Modulo (%)              | ✅                |                |
+  | Exponentiation (**)     | ✅                |                |
+  | Comparisons             | ✅                |                |
+  | Arrays                  | ✅                |                |
+  | Control Flow (if/while) | ✅                |                |
+  | Print Statements        | ✅                |                |
+  | Function Definitions    | ✅                |                |
+  | Function Calls          | ✅                |                |
+  | Structs                 | ✅                |                |
+  | Property Access (.)     | ✅                |                |
+  | C-Interop               | ❌                |                |
 
 
 ## TODO
 
-- broken array and structs
+### bugs
+
+- broken functions, arrays and structs
+- simpler struct and function declaration syntax
+
+
+### features
 - null type, void type
 - pointer types
 - ffi with C
 - heap allocation
+- bitfields & operators
+
+### misc
 - sample programs
 - data structure libraries
-- bitfields
-- bitwise operators etc.
-- modules - compile each file to .o and link separately for now?
-- Compile to QBE, LLVM, ArmV8, x86-64 and RISC-V (emits assembly/IR)
-- Optimization passes from CS6120 for the compiler
+- modules? - compile each file to .o and link separately for now?
 
-### Security & Production Readiness
+### targets
+- compile to QBE, LLVM, x86-64 and RISC-V
+- ast-walking & bytecode interpreter + stack machine
+
+### optimizations
+- optimization passes from CS6120 for the compiler
+
+### syntax
+- different syntaxes (specify as JSON, imperative?)
+
+## Security & Production Readiness
 - Add file size limits to prevent potential overflow on very large source files
 - Enhanced input validation for source file content structure
 - Sanitize error messages to prevent format string vulnerabilities with user-controlled filenames
@@ -116,8 +145,4 @@ k.d1.b
 
 ## TODO
 
-Here's what I hope to accomplish today:
-
-1. Go through the list of items that are marked as working in the # Progress section in the README and verify if they actually work with a test case in tests/
-2. Implement missing pieces to ensure things are working correctly
-3. Go thorough the code for each feature (eg: function calls): parser/code generator and understand how they fit together
+- refactor for understandability

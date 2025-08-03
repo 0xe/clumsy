@@ -1,2 +1,3 @@
-(let p Point #((x 10)(y 20)))
-(print p.x)
+(let Point struct #((x int 10) (y int 20)))
+(let p Point #(2 3))
+(print (+ p.x p.y))

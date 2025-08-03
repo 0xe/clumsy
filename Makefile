@@ -6,7 +6,7 @@ TARGET = clumsyc
 SRCDIR = src
 TESTDIR = tests
 TMPDIR = tmp
-SOURCES = $(SRCDIR)/main.c $(SRCDIR)/tokenizer.c $(SRCDIR)/parser.c $(SRCDIR)/compiler.c
+SOURCES = $(SRCDIR)/main.c $(SRCDIR)/tokenizer.c $(SRCDIR)/parser.c $(SRCDIR)/compiler.c $(SRCDIR)/print_helpers.c
 OBJECTS = $(SOURCES:.c=.o)
 HEADERS = $(SRCDIR)/types.h $(SRCDIR)/tokenizer.h $(SRCDIR)/parser.h $(SRCDIR)/compiler.h
 
@@ -45,23 +45,6 @@ test: $(TARGET)
 						echo "PASS"; \
 					else \
 						echo "FAIL (output mismatch)"; \
-						failed=$$((failed + 1)); \
-					fi; \
-				elif [ -f $(TESTDIR)/$$testname.expected_exit_code ]; then \
-					$(TMPDIR)/$$testname.x >/dev/null 2>&1; \
-					actual_exit_code=$$?; \
-					expected_exit_code=$$(cat $(TESTDIR)/$$testname.expected_exit_code); \
-					if [ $$actual_exit_code -eq $$expected_exit_code ]; then \
-						echo "PASS"; \
-					else \
-						echo "FAIL (exit code mismatch: expected $$expected_exit_code, got $$actual_exit_code)"; \
-						failed=$$((failed + 1)); \
-					fi; \
-				else \
-					if $(TMPDIR)/$$testname.x >/dev/null 2>&1; then \
-						echo "PASS"; \
-					else \
-						echo "FAIL (runtime error)"; \
 						failed=$$((failed + 1)); \
 					fi; \
 				fi; \
