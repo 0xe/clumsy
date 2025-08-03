@@ -114,10 +114,12 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
                                     symbol.type = SYM_INT; // default
                                 }
                             } else if (type_node->type == AST_LIST && type_node->data.list.count >= 2) {
-                                // Handle array types: (array_type int 4)
+                                // Handle array types: (array_type int 4) or ([] int 4)
                                 ASTNode *array_op = type_node->data.list.children[0];
-                                if (array_op->type == AST_IDENTIFIER && strcmp(array_op->data.string_value, "array_type") == 0) {
-                                    symbol.type = SYM_INT; // For now, treat arrays as int (simplified)
+                                if (array_op->type == AST_IDENTIFIER && 
+                                    (strcmp(array_op->data.string_value, "array_type") == 0 ||
+                                     strcmp(array_op->data.string_value, "[]") == 0)) {
+                                    symbol.type = SYM_ARRAY; // Properly set as array type
                                 } else {
                                     symbol.type = SYM_INT; // default
                                 }
@@ -189,7 +191,14 @@ int get_symbol_offset(SymbolTable *table, const char *name) {
         if (strcmp(table->symbols[i].name, name) == 0) {
             return offset;
         }
-        offset += 8; // 8 bytes per variable
+        // Calculate space needed for this symbol
+        if (table->symbols[i].type == SYM_ARRAY) {
+            offset += 32; // 4 elements × 8 bytes for arrays (assuming int[4])
+        } else if (table->symbols[i].type == SYM_STRUCT) {
+            offset += 16; // 2 fields × 8 bytes for structs  
+        } else {
+            offset += 8; // 8 bytes for regular variables
+        }
     }
     return -1; // Not found
 }
@@ -410,10 +419,38 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             ASTNode *array_var = expr->data.list.children[1];
                             ASTNode *index = expr->data.list.children[2];
                             
-                            // For now, just load the array variable (treating as first element)
-                            // This is a simplified implementation
                             if (array_var->type == AST_IDENTIFIER) {
-                                emit_load_variable(codegen, "x0", array_var->data.string_value, symbols);
+                                // Get the base offset of the array
+                                int array_offset = get_symbol_offset(symbols, array_var->data.string_value);
+                                
+                                if (array_offset >= 0) {
+                                    // Calculate element offset based on index
+                                    int element_offset = 0;
+                                    if (index->type == AST_INT) {
+                                        // Static index - calculate offset directly
+                                        element_offset = index->data.int_value * 8;  // 8 bytes per element
+                                        emit_code(codegen, "    ldr   x0, [sp, #%d]\n", array_offset + element_offset);
+                                    } else {
+                                        // Dynamic index - need to calculate at runtime
+                                        // Load index into x1
+                                        if (index->type == AST_IDENTIFIER) {
+                                            emit_load_variable(codegen, "x1", index->data.string_value, symbols);
+                                        } else {
+                                            generate_expression(codegen, index, symbols);
+                                            emit_code(codegen, "    mov   x1, x0\n");
+                                        }
+                                        
+                                        // Calculate element address: base + (index * 8)
+                                        emit_code(codegen, "    mov   x2, #8\n");
+                                        emit_code(codegen, "    mul   x1, x1, x2\n");
+                                        emit_code(codegen, "    mov   x2, sp\n");
+                                        emit_code(codegen, "    add   x2, x2, #%d\n", array_offset);
+                                        emit_code(codegen, "    add   x2, x2, x1\n");
+                                        emit_code(codegen, "    ldr   x0, [x2]\n");
+                                    }
+                                } else {
+                                    emit_mov_immediate(codegen, "x0", 0);
+                                }
                             }
                         }
                     }
@@ -498,18 +535,27 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                     emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                     reg_index++;
                                 } else if (arg->type == AST_IDENTIFIER) {
-                                    // Check if this is a struct variable by looking at symbol table
+                                    // Check if this is a struct or array variable by looking at symbol table
                                     Symbol *arg_symbol = find_symbol(symbols, arg->data.string_value);
                                     if (arg_symbol && arg_symbol->type == SYM_STRUCT) {
                                         // This is a struct - copy all fields (assuming 2 fields for now)
                                         int struct_offset = get_symbol_offset(symbols, arg->data.string_value);
                                         // Copy field 0 (x)
-                                        emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset);
+                                        emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 16);
                                         emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                         reg_index++;
                                         // Copy field 1 (y) if we have register space
                                         if (reg_index < 4) {
-                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 8);
+                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 8 + 16);
+                                            emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                            reg_index++;
+                                        }
+                                    } else if (arg_symbol && arg_symbol->type == SYM_ARRAY) {
+                                        // This is an array - copy all elements (assuming 4 elements for now)
+                                        int array_offset = get_symbol_offset(symbols, arg->data.string_value);
+                                        // Copy elements 0, 1, 2, 3
+                                        for (int elem = 0; elem < 4 && reg_index < 4; elem++) {
+                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", array_offset + elem * 8 + 16);
                                             emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                             reg_index++;
                                         }
@@ -574,21 +620,46 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                 // 4-element format: (let name type init)
                 ASTNode *init = stmt->data.list.children[3];
                 
-                // Check if this is a struct initialization
+                // Check if this is a struct or array initialization
                 if (init->type == AST_LIST && init->data.list.count >= 2) {
                     ASTNode *init_op = init->data.list.children[0];
                     if (init_op->type == AST_IDENTIFIER && strcmp(init_op->data.string_value, "#") == 0) {
-                        // This is a struct literal - store each field
-                        ASTNode *fields = init->data.list.children[1];
-                        if (fields->type == AST_LIST) {
-                            int base_offset = get_symbol_offset(symbols, name_node->data.string_value);
-                            for (size_t i = 0; i < fields->data.list.count; i++) {
-                                ASTNode *field = fields->data.list.children[i];
-                                if (field->type == AST_LIST && field->data.list.count >= 2) {
-                                    ASTNode *field_value = field->data.list.children[1];
-                                    generate_expression(codegen, field_value, symbols);
-                                    // Store each field at base + field_index * 8
+                        // Check if we have a type to determine if this is array or struct
+                        ASTNode *type_node = stmt->data.list.children[2];
+                        bool is_array_type = false;
+                        if (type_node->type == AST_IDENTIFIER && strstr(type_node->data.string_value, "[") != NULL) {
+                            is_array_type = true;
+                        } else if (type_node->type == AST_LIST && type_node->data.list.count >= 1) {
+                            ASTNode *first_child = type_node->data.list.children[0];
+                            if (first_child->type == AST_IDENTIFIER && strcmp(first_child->data.string_value, "[]") == 0) {
+                                is_array_type = true;
+                            }
+                        }
+                        if (is_array_type) {
+                            // This is an array literal like #(10 20 30 40)
+                            ASTNode *elements = init->data.list.children[1];
+                            if (elements->type == AST_LIST) {
+                                int base_offset = get_symbol_offset(symbols, name_node->data.string_value);
+                                for (size_t i = 0; i < elements->data.list.count; i++) {
+                                    ASTNode *element = elements->data.list.children[i];
+                                    generate_expression(codegen, element, symbols);
+                                    // Store each element at base + element_index * 8
                                     emit_code(codegen, "    str   x0, [sp, #%d]\n", base_offset + (int)i * 8);
+                                }
+                            }
+                        } else {
+                            // This is a struct literal - store each field
+                            ASTNode *fields = init->data.list.children[1];
+                            if (fields->type == AST_LIST) {
+                                int base_offset = get_symbol_offset(symbols, name_node->data.string_value);
+                                for (size_t i = 0; i < fields->data.list.count; i++) {
+                                    ASTNode *field = fields->data.list.children[i];
+                                    if (field->type == AST_LIST && field->data.list.count >= 2) {
+                                        ASTNode *field_value = field->data.list.children[1];
+                                        generate_expression(codegen, field_value, symbols);
+                                        // Store each field at base + field_index * 8
+                                        emit_code(codegen, "    str   x0, [sp, #%d]\n", base_offset + (int)i * 8);
+                                    }
                                 }
                             }
                         }
@@ -604,32 +675,8 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                 // 3-element format: (let name value)
                 ASTNode *init = stmt->data.list.children[2];
                 
-                // Check if this is a struct initialization
-                if (init->type == AST_LIST && init->data.list.count >= 2) {
-                    ASTNode *init_op = init->data.list.children[0];
-                    if (init_op->type == AST_IDENTIFIER && strcmp(init_op->data.string_value, "#") == 0) {
-                        // This is a struct literal - store each field
-                        ASTNode *fields = init->data.list.children[1];
-                        if (fields->type == AST_LIST) {
-                            int base_offset = get_symbol_offset(symbols, name_node->data.string_value);
-                            for (size_t i = 0; i < fields->data.list.count; i++) {
-                                ASTNode *field = fields->data.list.children[i];
-                                if (field->type == AST_LIST && field->data.list.count >= 2) {
-                                    ASTNode *field_value = field->data.list.children[1];
-                                    generate_expression(codegen, field_value, symbols);
-                                    // Store each field at base + field_index * 8
-                                    emit_code(codegen, "    str   x0, [sp, #%d]\n", base_offset + (int)i * 8);
-                                }
-                            }
-                        }
-                    } else {
-                        generate_expression(codegen, init, symbols);
-                        emit_store_variable(codegen, "x0", name_node->data.string_value, symbols);
-                    }
-                } else {
-                    generate_expression(codegen, init, symbols);
-                    emit_store_variable(codegen, "x0", name_node->data.string_value, symbols);
-                }
+                generate_expression(codegen, init, symbols);
+                emit_store_variable(codegen, "x0", name_node->data.string_value, symbols);
             } else {
                 // No initializer, default to 0
                 emit_mov_immediate(codegen, "x0", 0);
@@ -783,16 +830,10 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
         if (params->type == AST_LIST || params->type == AST_ARRAY) {
             param_count = params->data.list.count;
             
-            // Allocate stack space for parameters
-            if (param_count > 0) {
-                int stack_space = param_count * 8;
-                if (stack_space % 16 != 0) {
-                    stack_space += 16 - (stack_space % 16);
-                }
-                emit_code(codegen, "    sub   sp, sp, #%d\n", stack_space);
-            }
+            // Allocate stack space for parameters (calculate after processing all params)
+            int stack_space = 0;
             
-            // Store parameters from registers to stack and add to symbol table
+            // First pass: analyze parameters and add to symbol table (don't store yet)
             int reg_index = 0;
             for (int i = 0; i < param_count && reg_index < 4; i++) {
                 ASTNode *param = params->data.list.children[i];
@@ -811,39 +852,115 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                     }
                     if (type_node->type == AST_IDENTIFIER) {
                         param_type = type_node->data.string_value;
+                    } else if (type_node->type == AST_LIST && type_node->data.list.count >= 1) {
+                        // Check if this is an array type: ([] int 4)
+                        ASTNode *first_child = type_node->data.list.children[0];
+                        if (first_child->type == AST_IDENTIFIER && strcmp(first_child->data.string_value, "[]") == 0) {
+                            param_type = "array"; // Mark as array type
+                        }
                     }
                 }
                 
                 if (param_name) {
-                    // Check if this is a struct type (like "Point")
+                    // Check parameter type to determine how to handle it
                     if (param_type && (strcmp(param_type, "Point") == 0 || 
                                      strcmp(param_type, "struct") == 0 ||
                                      // Add more struct type names as needed
                                      (param_type[0] >= 'A' && param_type[0] <= 'Z'))) {
-                        // This is a struct parameter - store both fields
-                        // Field 0 (x)
-                        emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
-                        reg_index++;
-                        // Field 1 (y)
-                        if (reg_index < 4) {
-                            emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
-                            reg_index++;
-                        }
+                        // This is a struct parameter - track register usage
+                        reg_index += 2; // Struct uses 2 registers
                         
                         // Add struct symbol to function symbol table
                         Symbol symbol;
                         symbol.name = strdup(param_name);
                         symbol.type = SYM_STRUCT;
                         add_symbol(func_symbols, symbol);
+                    } else if (param_type && (strstr(param_type, "[") != NULL || strcmp(param_type, "array") == 0)) {
+                        // This is an array parameter - track register usage
+                        reg_index += 4; // Array uses 4 registers
+                        
+                        // Add array symbol to function symbol table
+                        Symbol symbol;
+                        symbol.name = strdup(param_name);
+                        symbol.type = SYM_ARRAY;
+                        add_symbol(func_symbols, symbol);
                     } else {
-                        // Regular parameter
-                        emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
+                        // Regular parameter - track register usage
+                        reg_index++;
                         
                         // Add to function symbol table
                         Symbol symbol;
                         symbol.name = strdup(param_name);
                         symbol.type = SYM_INT; // Default to int
                         add_symbol(func_symbols, symbol);
+                    }
+                }
+            }
+            
+            // Calculate and allocate stack space based on parameter types
+            for (size_t i = 0; i < func_symbols->count; i++) {
+                if (func_symbols->symbols[i].type == SYM_ARRAY) {
+                    stack_space += 32; // 4 elements × 8 bytes for arrays (assuming int[4])
+                } else if (func_symbols->symbols[i].type == SYM_STRUCT) {
+                    stack_space += 16; // 2 fields × 8 bytes for structs  
+                } else {
+                    stack_space += 8; // 8 bytes for regular variables
+                }
+            }
+            if (stack_space % 16 != 0) {
+                stack_space += 16 - (stack_space % 16);
+            }
+            if (stack_space > 0) {
+                emit_code(codegen, "    sub   sp, sp, #%d\n", stack_space);
+            }
+            
+            // Second pass: store parameters from registers to stack
+            reg_index = 0;
+            for (int i = 0; i < param_count && reg_index < 4; i++) {
+                ASTNode *param = params->data.list.children[i];
+                const char *param_name = NULL;
+                const char *param_type = NULL;
+                
+                // Extract parameter info (same logic as first pass)
+                if (param->type == AST_IDENTIFIER) {
+                    param_name = param->data.string_value;
+                } else if (param->type == AST_LIST && param->data.list.count >= 2) {
+                    ASTNode *name_node = param->data.list.children[0];
+                    ASTNode *type_node = param->data.list.children[1];
+                    if (name_node->type == AST_IDENTIFIER) {
+                        param_name = name_node->data.string_value;
+                    }
+                    if (type_node->type == AST_IDENTIFIER) {
+                        param_type = type_node->data.string_value;
+                    } else if (type_node->type == AST_LIST && type_node->data.list.count >= 1) {
+                        ASTNode *first_child = type_node->data.list.children[0];
+                        if (first_child->type == AST_IDENTIFIER && strcmp(first_child->data.string_value, "[]") == 0) {
+                            param_type = "array";
+                        }
+                    }
+                }
+                
+                if (param_name) {
+                    // Store parameter based on type
+                    if (param_type && (strcmp(param_type, "Point") == 0 || 
+                                     strcmp(param_type, "struct") == 0 ||
+                                     (param_type[0] >= 'A' && param_type[0] <= 'Z'))) {
+                        // Store struct fields
+                        emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
+                        reg_index++;
+                        if (reg_index < 4) {
+                            emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
+                            reg_index++;
+                        }
+                    } else if (param_type && (strstr(param_type, "[") != NULL || strcmp(param_type, "array") == 0)) {
+                        // Store array elements
+                        for (int elem = 0; elem < 4 && reg_index < 4; elem++) {
+                            emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
+                            reg_index++;
+                        }
+                    } else {
+                        // Store regular parameter
+                        emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
                         reg_index++;
                     }
                 }
@@ -861,12 +978,23 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
     }
     
     // Cleanup stack space for parameters
-    if (param_count > 0) {
-        int stack_space = param_count * 8;
-        if (stack_space % 16 != 0) {
-            stack_space += 16 - (stack_space % 16);
+    if (func_symbols->count > 0) {
+        int cleanup_space = 0;
+        for (size_t i = 0; i < func_symbols->count; i++) {
+            if (func_symbols->symbols[i].type == SYM_ARRAY) {
+                cleanup_space += 32; // 4 elements × 8 bytes for arrays (assuming int[4])
+            } else if (func_symbols->symbols[i].type == SYM_STRUCT) {
+                cleanup_space += 16; // 2 fields × 8 bytes for structs  
+            } else {
+                cleanup_space += 8; // 8 bytes for regular variables
+            }
         }
-        emit_code(codegen, "    add   sp, sp, #%d\n", stack_space);
+        if (cleanup_space % 16 != 0) {
+            cleanup_space += 16 - (cleanup_space % 16);
+        }
+        if (cleanup_space > 0) {
+            emit_code(codegen, "    add   sp, sp, #%d\n", cleanup_space);
+        }
     }
     
     // Restore frame and return
@@ -888,7 +1016,16 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
     emit_code(codegen, "    mov   x29, sp\n");
     
     // Calculate stack space needed
-    int stack_space = symbols->count * 8;
+    int stack_space = 0;
+    for (size_t i = 0; i < symbols->count; i++) {
+        if (symbols->symbols[i].type == SYM_ARRAY) {
+            stack_space += 32; // 4 elements × 8 bytes for arrays (assuming int[4])
+        } else if (symbols->symbols[i].type == SYM_STRUCT) {
+            stack_space += 16; // 2 fields × 8 bytes for structs  
+        } else {
+            stack_space += 8; // 8 bytes for regular variables
+        }
+    }
     if (stack_space % 16 != 0) {
         stack_space += 16 - (stack_space % 16);
     }
