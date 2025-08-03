@@ -101,7 +101,7 @@ int main(int argc, char *argv[]) {
     }
     
     // Compile to ARM64
-    char *assembly = compile_to_arm64(ast, symbols);
+    char *assembly = compile_to_arm64(ast, symbols, NULL);
     if (!assembly) {
         fprintf(stderr, "Error: Code generation failed\n");
         free_symbol_table(symbols);

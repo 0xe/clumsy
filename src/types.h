@@ -88,9 +88,34 @@ typedef struct {
             int param_count;
             SymbolType return_type;
         } function;
+        struct {
+            char *struct_type_name;
+        } struct_instance;
     } type_info;
     ASTNode *init_value;
 } Symbol;
+
+// Struct field definition
+typedef struct {
+    char *name;
+    SymbolType type;
+    ASTNode *default_value;
+} StructField;
+
+// Struct type definition
+typedef struct {
+    char *name;
+    StructField *fields;
+    size_t field_count;
+    size_t field_capacity;
+} StructType;
+
+// Struct type table
+typedef struct {
+    StructType *types;
+    size_t count;
+    size_t capacity;
+} StructTypeTable;
 
 typedef struct {
     Symbol *symbols;
@@ -105,7 +130,11 @@ ASTNode *parse(TokenArray *tokens);
 void free_ast(ASTNode *node);
 SymbolTable *build_symbol_table(ASTNode *ast);
 void free_symbol_table(SymbolTable *table);
-char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols);
+StructTypeTable *create_struct_type_table();
+void add_struct_type(StructTypeTable *table, const char *name, StructField *fields, size_t field_count);
+StructType *find_struct_type(StructTypeTable *table, const char *name);
+void free_struct_type_table(StructTypeTable *table);
+char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *struct_types);
 
 // Utility functions
 ASTNode *create_ast_node(ASTNodeType type);

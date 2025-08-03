@@ -1,6 +1,9 @@
 #include "compiler.h"
 #include <stdarg.h>
 
+// Global struct type table  
+static StructTypeTable *global_struct_types = NULL;
+
 CodeGen *create_codegen(void) {
     CodeGen *codegen = malloc(sizeof(CodeGen));
     if (!codegen) {
@@ -110,8 +113,13 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
                                     symbol.type = SYM_CHAR;
                                 } else if (strcmp(type_node->data.string_value, "bool") == 0) {
                                     symbol.type = SYM_BOOL;
+                                } else if (strcmp(type_node->data.string_value, "struct") == 0) {
+                                    // Skip struct type definitions, they don't create variables
+                                    continue;
                                 } else {
-                                    symbol.type = SYM_INT; // default
+                                    // This might be a user-defined struct type name
+                                    symbol.type = SYM_STRUCT;
+                                    symbol.type_info.struct_instance.struct_type_name = strdup(type_node->data.string_value);
                                 }
                             } else if (type_node->type == AST_LIST && type_node->data.list.count >= 2) {
                                 // Handle array types: (array_type int 4) or ([] int 4)
@@ -461,31 +469,45 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             ASTNode *field_name = expr->data.list.children[2];
                             
                             if (struct_var->type == AST_IDENTIFIER && field_name->type == AST_IDENTIFIER) {
-                                // Calculate field offset based on field name
-                                int field_offset = 0;
-                                const char *field = field_name->data.string_value;
-                                
-                                // Simple field mapping: x=0, y=8, z=16, etc.
-                                if (strcmp(field, "x") == 0) {
-                                    field_offset = 0;
-                                } else if (strcmp(field, "y") == 0) {
-                                    field_offset = 8;
-                                } else if (strcmp(field, "z") == 0) {
-                                    field_offset = 16;
-                                } else if (strcmp(field, "a") == 0) {
-                                    field_offset = 0;
-                                } else if (strcmp(field, "b") == 0) {
-                                    field_offset = 8;
-                                } else if (strcmp(field, "c") == 0) {
-                                    field_offset = 16;
-                                }
-                                
-                                // Load struct base address
-                                int struct_offset = get_symbol_offset(symbols, struct_var->data.string_value);
-                                if (struct_offset >= 0) {
-                                    // Load field value at struct_base + field_offset
-                                    emit_code(codegen, "    ldr   x0, [sp, #%d]\n", struct_offset + field_offset);
+                                // Find the struct variable to get its type
+                                Symbol *struct_symbol = find_symbol(symbols, struct_var->data.string_value);
+                                if (struct_symbol && struct_symbol->type == SYM_STRUCT) {
+                                    // Get the struct type name from the symbol
+                                    const char *struct_type_name = struct_symbol->type_info.struct_instance.struct_type_name;
+                                    
+                                    // Find the struct type definition
+                                    StructType *struct_type = find_struct_type(global_struct_types, struct_type_name);
+                                    if (struct_type) {
+                                        // Find the field in the struct type definition
+                                        const char *field = field_name->data.string_value;
+                                        int field_offset = -1;
+                                        
+                                        for (size_t i = 0; i < struct_type->field_count; i++) {
+                                            if (strcmp(struct_type->fields[i].name, field) == 0) {
+                                                field_offset = i * 8; // Each field is 8 bytes apart
+                                                break;
+                                            }
+                                        }
+                                        
+                                        if (field_offset >= 0) {
+                                            // Load struct base address
+                                            int struct_offset = get_symbol_offset(symbols, struct_var->data.string_value);
+                                            if (struct_offset >= 0) {
+                                                // Load field value at struct_base + field_offset
+                                                emit_code(codegen, "    ldr   x0, [sp, #%d]\n", struct_offset + field_offset);
+                                            } else {
+                                                emit_mov_immediate(codegen, "x0", 0);
+                                            }
+                                        } else {
+                                            // Field not found, emit error value
+                                            emit_mov_immediate(codegen, "x0", 0);
+                                        }
+                                    } else {
+                                        // Struct type not found, emit error value
+                                        emit_mov_immediate(codegen, "x0", 0);
+                                    }
                                 } else {
+                                    // Variable is not a struct, emit error value
                                     emit_mov_immediate(codegen, "x0", 0);
                                 }
                             }
@@ -618,7 +640,70 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
             
             if (stmt->data.list.count >= 4) {
                 // 4-element format: (let name type init)
+                ASTNode *type_node = stmt->data.list.children[2];
                 ASTNode *init = stmt->data.list.children[3];
+                
+                // Check if this is a struct type definition: (let TypeName struct #((field1 type1 val1) ...))
+                if (type_node->type == AST_IDENTIFIER && strcmp(type_node->data.string_value, "struct") == 0) {
+                    // This is a struct type definition - parse and store it
+                    if (init->type == AST_LIST && init->data.list.count >= 2 &&
+                        init->data.list.children[0]->type == AST_IDENTIFIER &&
+                        strcmp(init->data.list.children[0]->data.string_value, "#") == 0) {
+                        
+                        // Parse struct fields from #((field1 type1 val1) (field2 type2 val2) ...)
+                        ASTNode *fields_list = init->data.list.children[1];
+                        if (fields_list->type == AST_LIST) {
+                            // Create struct fields array
+                            size_t field_count = fields_list->data.list.count;
+                            StructField *fields = malloc(field_count * sizeof(StructField));
+                            
+                            for (size_t i = 0; i < field_count; i++) {
+                                ASTNode *field = fields_list->data.list.children[i];
+                                if (field->type == AST_LIST && field->data.list.count >= 3) {
+                                    ASTNode *field_name = field->data.list.children[0];
+                                    ASTNode *field_type = field->data.list.children[1];
+                                    ASTNode *field_default = field->data.list.children[2];
+                                    
+                                    if (field_name->type == AST_IDENTIFIER && field_type->type == AST_IDENTIFIER) {
+                                        fields[i].name = strdup(field_name->data.string_value);
+                                        
+                                        // Map type string to SymbolType
+                                        const char *type_str = field_type->data.string_value;
+                                        if (strcmp(type_str, "int") == 0) {
+                                            fields[i].type = SYM_INT;
+                                        } else if (strcmp(type_str, "char") == 0) {
+                                            fields[i].type = SYM_CHAR;
+                                        } else if (strcmp(type_str, "str") == 0) {
+                                            fields[i].type = SYM_STR;
+                                        } else if (strcmp(type_str, "bool") == 0) {
+                                            fields[i].type = SYM_BOOL;
+                                        } else {
+                                            // Assume it's a user-defined struct type
+                                            fields[i].type = SYM_STRUCT;
+                                        }
+                                        
+                                        fields[i].default_value = field_default; // Store reference to default value
+                                    }
+                                }
+                            }
+                            
+                            // Initialize global struct types table if not already done
+                            if (!global_struct_types) {
+                                global_struct_types = create_struct_type_table();
+                            }
+                            
+                            // Add struct type to table
+                            add_struct_type(global_struct_types, name_node->data.string_value, fields, field_count);
+                            
+                            // Clean up temporary fields array (add_struct_type makes its own copy)
+                            for (size_t i = 0; i < field_count; i++) {
+                                free(fields[i].name);
+                            }
+                            free(fields);
+                        }
+                    }
+                    return; // Don't generate code for struct type definitions
+                }
                 
                 // Check if this is a struct or array initialization
                 if (init->type == AST_ARRAY) {
@@ -634,14 +719,21 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                     ASTNode *init_op = init->data.list.children[0];
                     if (init_op->type == AST_IDENTIFIER && strcmp(init_op->data.string_value, "#") == 0) {
                         // Check if we have a type to determine if this is array or struct
-                        ASTNode *type_node = stmt->data.list.children[2];
                         bool is_array_type = false;
+                        bool is_struct_type = false;
+                        
                         if (type_node->type == AST_IDENTIFIER && strstr(type_node->data.string_value, "[") != NULL) {
                             is_array_type = true;
                         } else if (type_node->type == AST_LIST && type_node->data.list.count >= 1) {
                             ASTNode *first_child = type_node->data.list.children[0];
                             if (first_child->type == AST_IDENTIFIER && strcmp(first_child->data.string_value, "[]") == 0) {
                                 is_array_type = true;
+                            }
+                        } else if (type_node->type == AST_IDENTIFIER) {
+                            // Check if this is a user-defined struct type by looking in the struct type table
+                            const char *type_name = type_node->data.string_value;
+                            if (global_struct_types && find_struct_type(global_struct_types, type_name)) {
+                                is_struct_type = true;
                             }
                         }
                         if (is_array_type) {
@@ -656,8 +748,20 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                                     emit_code(codegen, "    str   x0, [sp, #%d]\n", base_offset + (int)i * 8);
                                 }
                             }
+                        } else if (is_struct_type) {
+                            // This is a user-defined struct instance with positional values: #(val1 val2 ...)
+                            ASTNode *values = init->data.list.children[1];
+                            if (values->type == AST_LIST) {
+                                int base_offset = get_symbol_offset(symbols, name_node->data.string_value);
+                                for (size_t i = 0; i < values->data.list.count; i++) {
+                                    ASTNode *value = values->data.list.children[i];
+                                    generate_expression(codegen, value, symbols);
+                                    // Store each field at base + field_index * 8
+                                    emit_code(codegen, "    str   x0, [sp, #%d]\n", base_offset + (int)i * 8);
+                                }
+                            }
                         } else {
-                            // This is a struct literal - store each field
+                            // This is a struct literal with named fields - store each field
                             ASTNode *fields = init->data.list.children[1];
                             if (fields->type == AST_LIST) {
                                 int base_offset = get_symbol_offset(symbols, name_node->data.string_value);
@@ -1101,8 +1205,13 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
     emit_code(codegen, "    ret\n");
 }
 
-char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols) {
+char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *struct_types) {
     CodeGen *codegen = create_codegen();
+    
+    // Initialize global struct types table
+    if (!global_struct_types) {
+        global_struct_types = create_struct_type_table();
+    }
     
     generate_preamble(codegen);
     
@@ -1153,4 +1262,68 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols) {
     free_codegen(codegen);
     
     return result;
+}
+
+// Struct type table management functions
+StructTypeTable *create_struct_type_table() {
+    StructTypeTable *table = malloc(sizeof(StructTypeTable));
+    if (!table) {
+        fprintf(stderr, "Error: Failed to allocate memory for struct type table\n");
+        exit(1);
+    }
+    table->types = NULL;
+    table->count = 0;
+    table->capacity = 0;
+    return table;
+}
+
+void add_struct_type(StructTypeTable *table, const char *name, StructField *fields, size_t field_count) {
+    if (table->count >= table->capacity) {
+        table->capacity = table->capacity == 0 ? 4 : table->capacity * 2;
+        table->types = realloc(table->types, table->capacity * sizeof(StructType));
+        if (!table->types) {
+            fprintf(stderr, "Error: Failed to reallocate memory for struct types\n");
+            exit(1);
+        }
+    }
+    
+    StructType *type = &table->types[table->count];
+    type->name = strdup(name);
+    type->fields = malloc(field_count * sizeof(StructField));
+    type->field_count = field_count;
+    type->field_capacity = field_count;
+    
+    // Copy fields
+    for (size_t i = 0; i < field_count; i++) {
+        type->fields[i].name = strdup(fields[i].name);
+        type->fields[i].type = fields[i].type;
+        type->fields[i].default_value = fields[i].default_value; // Shallow copy for now
+    }
+    
+    table->count++;
+}
+
+StructType *find_struct_type(StructTypeTable *table, const char *name) {
+    if (!table) return NULL;
+    
+    for (size_t i = 0; i < table->count; i++) {
+        if (strcmp(table->types[i].name, name) == 0) {
+            return &table->types[i];
+        }
+    }
+    return NULL;
+}
+
+void free_struct_type_table(StructTypeTable *table) {
+    if (!table) return;
+    
+    for (size_t i = 0; i < table->count; i++) {
+        free(table->types[i].name);
+        for (size_t j = 0; j < table->types[i].field_count; j++) {
+            free(table->types[i].fields[j].name);
+        }
+        free(table->types[i].fields);
+    }
+    free(table->types);
+    free(table);
 }

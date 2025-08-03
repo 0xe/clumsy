@@ -12,7 +12,7 @@ typedef struct {
 } CodeGen;
 
 // Compiler functions
-char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols);
+char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *struct_types);
 SymbolTable *build_symbol_table(ASTNode *ast);
 void free_symbol_table(SymbolTable *table);
 
