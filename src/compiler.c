@@ -621,7 +621,16 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                 ASTNode *init = stmt->data.list.children[3];
                 
                 // Check if this is a struct or array initialization
-                if (init->type == AST_LIST && init->data.list.count >= 2) {
+                if (init->type == AST_ARRAY) {
+                    // Handle AST_ARRAY type: [1 2 3 4]
+                    int base_offset = get_symbol_offset(symbols, name_node->data.string_value);
+                    for (size_t i = 0; i < init->data.list.count; i++) {
+                        ASTNode *element = init->data.list.children[i];
+                        generate_expression(codegen, element, symbols);
+                        // Store each element at base + element_index * 8
+                        emit_code(codegen, "    str   x0, [sp, #%d]\n", base_offset + (int)i * 8);
+                    }
+                } else if (init->type == AST_LIST && init->data.list.count >= 2) {
                     ASTNode *init_op = init->data.list.children[0];
                     if (init_op->type == AST_IDENTIFIER && strcmp(init_op->data.string_value, "#") == 0) {
                         // Check if we have a type to determine if this is array or struct
@@ -774,11 +783,11 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
         if (stmt->data.list.count >= 2) {
             ASTNode *expr = stmt->data.list.children[1];
             generate_expression(codegen, expr, symbols);
-            emit_code(codegen, "    ret\n");
+            // Don't emit ret here - let function epilogue handle it
         } else {
             // Return void
             emit_mov_immediate(codegen, "x0", 0);
-            emit_code(codegen, "    ret\n");
+            // Don't emit ret here - let function epilogue handle it
         }
     } else {
         // Check if this is a function call
@@ -969,9 +978,9 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
     }
     
     // Generate function body with function-local symbols
-    if (fn_node->data.list.count >= 3) {
-        ASTNode *body = fn_node->data.list.children[2];
-        generate_expression(codegen, body, func_symbols);
+    if (fn_node->data.list.count >= 4) {
+        ASTNode *body = fn_node->data.list.children[3];
+        generate_statement(codegen, body, func_symbols);
     } else {
         // No body, return 0
         emit_mov_immediate(codegen, "x0", 0);

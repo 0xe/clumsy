@@ -1,3 +1,3 @@
-(let square (fn [x] (* x x)))
+(let square (fn [(x int)] int (* x x)))
 (let result int (square 4))
 (print result)
