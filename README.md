@@ -92,6 +92,7 @@ k.d1.b
 
 ## TODO
 
+- broken array and structs
 - null type, void type
 - pointer types
 - ffi with C
