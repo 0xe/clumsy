@@ -117,10 +117,11 @@ typedef struct {
     size_t capacity;
 } StructTypeTable;
 
-typedef struct {
+typedef struct SymbolTable {
     Symbol *symbols;
     size_t count;
     size_t capacity;
+    struct SymbolTable *parent;  // Link to parent scope for hierarchical lookup
 } SymbolTable;
 
 // Function prototypes
@@ -135,6 +136,7 @@ void add_struct_type(StructTypeTable *table, const char *name, StructField *fiel
 StructType *find_struct_type(StructTypeTable *table, const char *name);
 void free_struct_type_table(StructTypeTable *table);
 char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *struct_types);
+Symbol *find_symbol_recursive(SymbolTable *table, const char *name);
 
 // Utility functions
 ASTNode *create_ast_node(ASTNodeType type);

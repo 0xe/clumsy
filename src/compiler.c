@@ -78,6 +78,7 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
     table->symbols = NULL;
     table->count = 0;
     table->capacity = 0;
+    table->parent = NULL;  // Global symbol table has no parent
     
     // Traverse AST and collect symbols
     if (ast->type == AST_LIST) {
@@ -219,6 +220,21 @@ void free_symbol_table(SymbolTable *table) {
         free(table->symbols);
         free(table);
     }
+}
+
+Symbol *find_symbol_recursive(SymbolTable *table, const char *name) {
+    if (!table) return NULL;
+    
+    // Search current scope
+    Symbol *symbol = find_symbol(table, name);
+    if (symbol) return symbol;
+    
+    // Search parent scope
+    if (table->parent) {
+        return find_symbol_recursive(table->parent, name);
+    }
+    
+    return NULL;
 }
 
 bool uses_exponentiation(ASTNode *node) {
@@ -537,8 +553,8 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                     }
                     // Handle function calls: (function_name arg1 arg2 ...)
                     else {
-                        // Check if this is a function call
-                        Symbol *func_symbol = find_symbol(symbols, op->data.string_value);
+                        // Check if this is a function call using recursive symbol lookup
+                        Symbol *func_symbol = find_symbol_recursive(symbols, op->data.string_value);
                         if (func_symbol && func_symbol->type == SYM_FUNCTION) {
                             // Generate function call
                             emit_code(codegen, "    // Function call: %s\n", op->data.string_value);
@@ -582,8 +598,14 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                             reg_index++;
                                         }
                                     } else {
-                                        // Regular variable
-                                        emit_load_variable(codegen, "x9", arg->data.string_value, symbols);
+                                        // Regular variable - need to account for stack pointer movement due to stp instruction
+                                        int arg_offset = get_symbol_offset(symbols, arg->data.string_value);
+                                        if (arg_offset >= 0) {
+                                            // Add 16 to offset to account for saved registers
+                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", arg_offset + 16);
+                                        } else {
+                                            emit_mov_immediate(codegen, "x9", 0);
+                                        }
                                         emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                         reg_index++;
                                     }
@@ -599,77 +621,8 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             // Restore link register
                             emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
                         } else {
-                            // Check if this might be a global function call even if not in local symbol table
-                            // Only treat it as a function call if:
-                            // 1. It has arguments, AND
-                            // 2. It's not a special keyword like "fn", "ret", "let", etc.
-                            const char *func_name = op->data.string_value;
-                            if (expr->data.list.count > 1 && 
-                                strcmp(func_name, "fn") != 0 &&
-                                strcmp(func_name, "ret") != 0 &&
-                                strcmp(func_name, "let") != 0 &&
-                                strcmp(func_name, "if") != 0 &&
-                                strcmp(func_name, "while") != 0 &&
-                                strcmp(func_name, "begin") != 0 &&
-                                strcmp(func_name, "set") != 0 &&
-                                strcmp(func_name, "print") != 0 &&
-                                strcmp(func_name, "+") != 0 &&
-                                strcmp(func_name, "-") != 0 &&
-                                strcmp(func_name, "*") != 0 &&
-                                strcmp(func_name, "/") != 0 &&
-                                strcmp(func_name, "%") != 0 &&
-                                strcmp(func_name, "**") != 0 &&
-                                strcmp(func_name, "==") != 0 &&
-                                strcmp(func_name, "<") != 0 &&
-                                strcmp(func_name, ">") != 0 &&
-                                strcmp(func_name, "<=") != 0 &&
-                                strcmp(func_name, ">=") != 0 &&
-                                strcmp(func_name, "[]") != 0 &&
-                                strcmp(func_name, ".") != 0 &&
-                                strcmp(func_name, "#") != 0) {
-                                // Generate function call assuming it's a global function
-                                emit_code(codegen, "    // Function call: %s\n", op->data.string_value);
-                                
-                                // Save link register
-                                emit_code(codegen, "    stp   x29, x30, [sp, #-16]!\n");
-                                
-                                // Pass arguments
-                                int arg_count = expr->data.list.count - 1; // Subtract 1 for function name
-                                int reg_index = 0;
-                                
-                                for (int i = 0; i < arg_count && reg_index < 4; i++) {
-                                    ASTNode *arg = expr->data.list.children[i + 1];
-                                    if (arg->type == AST_INT) {
-                                        emit_mov_immediate(codegen, "x9", arg->data.int_value);
-                                        emit_code(codegen, "    mov   x%d, x9\n", reg_index);
-                                        reg_index++;
-                                    } else if (arg->type == AST_IDENTIFIER) {
-                                        // Load variable (parameter or local)
-                                        // Need to account for the stack pointer movement due to stp instruction
-                                        int arg_offset = get_symbol_offset(symbols, arg->data.string_value);
-                                        if (arg_offset >= 0) {
-                                            // Add 16 to offset to account for saved registers
-                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", arg_offset + 16);
-                                        } else {
-                                            emit_mov_immediate(codegen, "x9", 0);
-                                        }
-                                        emit_code(codegen, "    mov   x%d, x9\n", reg_index);
-                                        reg_index++;
-                                    } else if (arg->type == AST_LIST) {
-                                        generate_expression(codegen, arg, symbols);
-                                        emit_code(codegen, "    mov   x%d, x0\n", reg_index);
-                                        reg_index++;
-                                    }
-                                }
-                                
-                                emit_code(codegen, "    bl    %s\n", op->data.string_value);
-                                
-                                // Restore link register
-                                emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
-                            } else {
-                                // Unknown identifier, return 0
-                                emit_mov_immediate(codegen, "x0", 0);
-                            }
+                            // Unknown function or identifier, return 0
+                            emit_mov_immediate(codegen, "x0", 0);
                         }
                     }
                 }
@@ -1004,6 +957,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
     func_symbols->symbols = NULL;
     func_symbols->count = 0;
     func_symbols->capacity = 0;
+    func_symbols->parent = symbols;  // Link to global symbol table
     
     // Extract parameters and create local symbols
     int param_count = 0;
