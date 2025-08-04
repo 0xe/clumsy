@@ -364,39 +364,109 @@ void free_ast(ASTNode *node) {
     free(node);
 }
 
+void print_symbol_table(SymbolTable *symbols) {
+    if (!symbols) {
+        fprintf(stderr, "  (null symbol table)\n");
+        return;
+    }
+    
+    if (symbols->count == 0) {
+        fprintf(stderr, "  (empty symbol table)\n");
+        return;
+    }
+    
+    for (size_t i = 0; i < symbols->count; i++) {
+        Symbol *sym = &symbols->symbols[i];
+        fprintf(stderr, "  %s: ", sym->name);
+        
+        switch (sym->type) {
+            case SYM_INT:
+                fprintf(stderr, "int");
+                break;
+            case SYM_STR:
+                fprintf(stderr, "str");
+                break;
+            case SYM_CHAR:
+                fprintf(stderr, "char");
+                break;
+            case SYM_BOOL:
+                fprintf(stderr, "bool");
+                break;
+            case SYM_ARRAY:
+                fprintf(stderr, "array[%d] of ", sym->type_info.array.size);
+                switch (sym->type_info.array.element_type) {
+                    case SYM_INT: fprintf(stderr, "int"); break;
+                    case SYM_STR: fprintf(stderr, "str"); break;
+                    case SYM_CHAR: fprintf(stderr, "char"); break;
+                    case SYM_BOOL: fprintf(stderr, "bool"); break;
+                    default: fprintf(stderr, "unknown"); break;
+                }
+                break;
+            case SYM_STRUCT:
+                fprintf(stderr, "struct %s", sym->type_info.struct_instance.struct_type_name);
+                break;
+            case SYM_FUNCTION:
+                fprintf(stderr, "fn(");
+                for (int j = 0; j < sym->type_info.function.param_count; j++) {
+                    if (j > 0) fprintf(stderr, ", ");
+                    switch (sym->type_info.function.param_types[j]) {
+                        case SYM_INT: fprintf(stderr, "int"); break;
+                        case SYM_STR: fprintf(stderr, "str"); break;
+                        case SYM_CHAR: fprintf(stderr, "char"); break;
+                        case SYM_BOOL: fprintf(stderr, "bool"); break;
+                        default: fprintf(stderr, "unknown"); break;
+                    }
+                }
+                fprintf(stderr, ") -> ");
+                switch (sym->type_info.function.return_type) {
+                    case SYM_INT: fprintf(stderr, "int"); break;
+                    case SYM_STR: fprintf(stderr, "str"); break;
+                    case SYM_CHAR: fprintf(stderr, "char"); break;
+                    case SYM_BOOL: fprintf(stderr, "bool"); break;
+                    default: fprintf(stderr, "unknown"); break;
+                }
+                break;
+            default:
+                fprintf(stderr, "unknown_type(%d)", sym->type);
+                break;
+        }
+        fprintf(stderr, "\n");
+    }
+}
+
 void print_ast(ASTNode *node, int indent) {
     if (!node) {
-        printf("%*sNULL\n", indent, "");
+        fprintf(stderr, "%*sNULL\n", indent, "");
         return;
     }
     
     switch (node->type) {
         case AST_INT:
-            printf("%*sINT: %d\n", indent, "", node->data.int_value);
+            fprintf(stderr, "%*sINT: %d\n", indent, "", node->data.int_value);
             break;
         case AST_CHAR:
-            printf("%*sCHAR: '%c'\n", indent, "", node->data.char_value);
+            fprintf(stderr, "%*sCHAR: '%c'\n", indent, "", node->data.char_value);
             break;
         case AST_IDENTIFIER:
-            printf("%*sIDENTIFIER: %s\n", indent, "", node->data.string_value);
+            fprintf(stderr, "%*sIDENTIFIER: %s\n", indent, "", node->data.string_value);
             break;
         case AST_STRING:
-            printf("%*sSTRING: \"%s\"\n", indent, "", node->data.string_value);
+            fprintf(stderr, "%*sSTRING: \"%s\"\n", indent, "", node->data.string_value);
             break;
         case AST_LIST:
-            printf("%*sLIST (%zu children):\n", indent, "", node->data.list.count);
+            fprintf(stderr, "%*sLIST (%zu children):\n", indent, "", node->data.list.count);
             for (size_t i = 0; i < node->data.list.count; i++) {
                 print_ast(node->data.list.children[i], indent + 2);
             }
             break;
         case AST_ARRAY:
-            printf("%*sARRAY (%zu elements):\n", indent, "", node->data.list.count);
+            fprintf(stderr, "%*sARRAY (%zu elements):\n", indent, "", node->data.list.count);
             for (size_t i = 0; i < node->data.list.count; i++) {
                 print_ast(node->data.list.children[i], indent + 2);
             }
             break;
         default:
-            printf("%*sUNKNOWN TYPE: %d\n", indent, "", node->type);
+            fprintf(stderr, "%*sUNKNOWN TYPE: %d\n", indent, "", node->type);
             break;
     }
 }

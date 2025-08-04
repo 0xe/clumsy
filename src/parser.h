@@ -29,5 +29,6 @@ bool match_value(Parser *parser, const char *value);
 
 // Debug utilities
 void print_ast(ASTNode *node, int indent);
+void print_symbol_table(SymbolTable *symbols);
 
 #endif // PARSER_H

@@ -5,17 +5,17 @@
 #include "compiler.h"
 
 void usage(const char *program_name) {
-    fprintf(stderr, "Usage: %s [--ast] <source_file>\n", program_name);
-    fprintf(stderr, "Compiles Cimple source code to ARM64 assembly\n");
-    fprintf(stderr, "Options:\n");
-    fprintf(stderr, "  --ast    Print the Abstract Syntax Tree and exit\n");
+    fprintf(stderr, "usage: %s [--debug] <source_file>\n", program_name);
+    fprintf(stderr, "compile clumsy to ARM64 assembly\n");
+    fprintf(stderr, "options:\n");
+    fprintf(stderr, "  --debug    print syntax tree and symbol table to stderr\n");
     exit(1);
 }
 
 char *read_file(const char *filename) {
     FILE *file = fopen(filename, "r");
     if (!file) {
-        fprintf(stderr, "Error: Cannot open file '%s'\n", filename);
+        fprintf(stderr, "error: cannot open file '%s'\n", filename);
         exit(1);
     }
     
@@ -27,7 +27,7 @@ char *read_file(const char *filename) {
     // Allocate buffer and read file
     char *content = malloc(file_size + 1);
     if (!content) {
-        fprintf(stderr, "Error: Failed to allocate memory for file content\n");
+        fprintf(stderr, "error: failed to allocate memory for file content\n");
         fclose(file);
         exit(1);
     }
@@ -40,13 +40,13 @@ char *read_file(const char *filename) {
 }
 
 int main(int argc, char *argv[]) {
-    bool print_ast_flag = false;
+    bool debug = false;
     const char *source_file = NULL;
     
     // Parse command line arguments
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--ast") == 0) {
-            print_ast_flag = true;
+        if (strcmp(argv[i], "--debug") == 0) {
+            debug = true;
         } else if (source_file == NULL) {
             source_file = argv[i];
         } else {
@@ -64,7 +64,7 @@ int main(int argc, char *argv[]) {
     // Tokenize
     TokenArray *tokens = tokenize(source_code);
     if (!tokens) {
-        fprintf(stderr, "Error: Tokenization failed\n");
+        fprintf(stderr, "error: tokenization failed\n");
         free(source_code);
         exit(1);
     }
@@ -72,38 +72,35 @@ int main(int argc, char *argv[]) {
     // Parse
     ASTNode *ast = parse(tokens);
     if (!ast) {
-        fprintf(stderr, "Error: Parsing failed\n");
+        fprintf(stderr, "error: parsing failed\n");
         free_token_array(tokens);
         free(source_code);
         exit(1);
-    }
-    
-    // If --ast flag is set, print AST and exit
-    if (print_ast_flag) {
-        printf("Abstract Syntax Tree:\n");
-        print_ast(ast, 0);
-        
-        // Cleanup and exit
-        free_ast(ast);
-        free_token_array(tokens);
-        free(source_code);
-        return 0;
     }
     
     // Build symbol table
     SymbolTable *symbols = build_symbol_table(ast);
     if (!symbols) {
-        fprintf(stderr, "Error: Symbol table construction failed\n");
+        fprintf(stderr, "error: symbol table construction failed\n");
         free_ast(ast);
         free_token_array(tokens);
         free(source_code);
         exit(1);
     }
+
+    // If --debug flag is set, print AST and exit
+    if (debug) {
+        fprintf(stderr, "ast:\n");
+        print_ast(ast, 0);
+        
+		fprintf(stderr, "symbol table:\n");
+		print_symbol_table(symbols);
+    }
     
     // Compile to ARM64
     char *assembly = compile_to_arm64(ast, symbols, NULL);
     if (!assembly) {
-        fprintf(stderr, "Error: Code generation failed\n");
+        fprintf(stderr, "error: code generation failed\n");
         free_symbol_table(symbols);
         free_ast(ast);
         free_token_array(tokens);
