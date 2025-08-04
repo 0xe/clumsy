@@ -32,11 +32,13 @@ void generate_preamble(CodeGen *codegen);
 void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols);
 void generate_function_definitions(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols);
 void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols);
+void generate_expression_with_adjustment(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols, int stack_adjustment);
 void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols);
 
 // ARM64 instruction helpers
 void emit_mov_immediate(CodeGen *codegen, const char *reg, int value);
 void emit_load_variable(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols);
+void emit_load_variable_with_adjustment(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols, int stack_adjustment);
 void emit_store_variable(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols);
 void emit_arithmetic(CodeGen *codegen, const char *op, const char *dest, const char *src1, const char *src2);
 

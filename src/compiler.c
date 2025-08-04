@@ -322,9 +322,13 @@ void emit_mov_immediate(CodeGen *codegen, const char *reg, int value) {
 }
 
 void emit_load_variable(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols) {
+    emit_load_variable_with_adjustment(codegen, reg, var_name, symbols, 0);
+}
+
+void emit_load_variable_with_adjustment(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols, int stack_adjustment) {
     int offset = get_symbol_offset(symbols, var_name);
     if (offset >= 0) {
-        emit_code(codegen, "    ldr   %s, [sp, #%d]\n", reg, offset);
+        emit_code(codegen, "    ldr   %s, [sp, #%d]\n", reg, offset + stack_adjustment);
     } else {
         emit_code(codegen, "    mov   %s, #0  // Error: undefined variable %s\n", reg, var_name);
     }
@@ -374,6 +378,83 @@ void emit_arithmetic(CodeGen *codegen, const char *op, const char *dest, const c
     }
 }
 
+void generate_expression_with_adjustment(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols, int stack_adjustment) {
+    if (!expr) return;
+    
+    switch (expr->type) {
+        case AST_INT:
+            emit_mov_immediate(codegen, "x0", expr->data.int_value);
+            break;
+            
+        case AST_CHAR:
+            emit_mov_immediate(codegen, "x0", (int)expr->data.char_value);
+            break;
+            
+        case AST_IDENTIFIER:
+            emit_load_variable_with_adjustment(codegen, "x0", expr->data.string_value, symbols, stack_adjustment);
+            break;
+            
+        case AST_LIST:
+            if (expr->data.list.count > 0) {
+                ASTNode *op = expr->data.list.children[0];
+                
+                if (op->type == AST_IDENTIFIER) {
+                    // Handle arithmetic and comparison operators
+                    if (strcmp(op->data.string_value, "+") == 0 ||
+                        strcmp(op->data.string_value, "-") == 0 ||
+                        strcmp(op->data.string_value, "*") == 0 ||
+                        strcmp(op->data.string_value, "/") == 0 ||
+                        strcmp(op->data.string_value, "%") == 0 ||
+                        strcmp(op->data.string_value, "**") == 0 ||
+                        strcmp(op->data.string_value, "==") == 0 ||
+                        strcmp(op->data.string_value, "<") == 0 ||
+                        strcmp(op->data.string_value, ">") == 0 ||
+                        strcmp(op->data.string_value, "<=") == 0 ||
+                        strcmp(op->data.string_value, ">=") == 0) {
+                        
+                        if (expr->data.list.count >= 3) {
+                            // Generate code for operands
+                            ASTNode *left = expr->data.list.children[1];
+                            ASTNode *right = expr->data.list.children[2];
+                            
+                            // Load left operand into x2
+                            if (left->type == AST_INT) {
+                                emit_mov_immediate(codegen, "x2", left->data.int_value);
+                            } else if (left->type == AST_IDENTIFIER) {
+                                emit_load_variable_with_adjustment(codegen, "x2", left->data.string_value, symbols, stack_adjustment);
+                            } else if (left->type == AST_LIST) {
+                                generate_expression_with_adjustment(codegen, left, symbols, stack_adjustment);
+                                emit_code(codegen, "    mov   x2, x0\n");
+                            }
+                            
+                            // Load right operand into x3
+                            if (right->type == AST_INT) {
+                                emit_mov_immediate(codegen, "x3", right->data.int_value);
+                            } else if (right->type == AST_IDENTIFIER) {
+                                emit_load_variable_with_adjustment(codegen, "x3", right->data.string_value, symbols, stack_adjustment);
+                            } else if (right->type == AST_LIST) {
+                                generate_expression_with_adjustment(codegen, right, symbols, stack_adjustment);
+                                emit_code(codegen, "    mov   x3, x0\n");
+                            }
+                            
+                            // Perform operation
+                            emit_arithmetic(codegen, op->data.string_value, "x0", "x2", "x3");
+                        }
+                    }
+                    // For other operations, fall back to normal expression generation
+                    else {
+                        generate_expression(codegen, expr, symbols);
+                    }
+                }
+            }
+            break;
+            
+        default:
+            emit_mov_immediate(codegen, "x0", 0);
+            break;
+    }
+}
+
 void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) {
     if (!expr) return;
     
@@ -413,24 +494,41 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             ASTNode *left = expr->data.list.children[1];
                             ASTNode *right = expr->data.list.children[2];
                             
-                            // Load left operand into x2
-                            if (left->type == AST_INT) {
-                                emit_mov_immediate(codegen, "x2", left->data.int_value);
-                            } else if (left->type == AST_IDENTIFIER) {
-                                emit_load_variable(codegen, "x2", left->data.string_value, symbols);
-                            } else if (left->type == AST_LIST) {
-                                generate_expression(codegen, left, symbols);
-                                emit_code(codegen, "    mov   x2, x0\n");
+                            // Check if right operand contains function calls that might corrupt x2
+                            bool right_has_function_call = false;
+                            if (right->type == AST_LIST) {
+                                // This is a simplification - assume any complex expression might have function calls
+                                right_has_function_call = true;
                             }
                             
-                            // Load right operand into x3
-                            if (right->type == AST_INT) {
-                                emit_mov_immediate(codegen, "x3", right->data.int_value);
-                            } else if (right->type == AST_IDENTIFIER) {
-                                emit_load_variable(codegen, "x3", right->data.string_value, symbols);
-                            } else if (right->type == AST_LIST) {
+                            if (right_has_function_call && left->type == AST_IDENTIFIER) {
+                                // Load right operand first to avoid register corruption
                                 generate_expression(codegen, right, symbols);
                                 emit_code(codegen, "    mov   x3, x0\n");
+                                
+                                // Then load left operand into x2
+                                emit_load_variable(codegen, "x2", left->data.string_value, symbols);
+                            } else {
+                                // Standard order: load left, then right
+                                // Load left operand into x2
+                                if (left->type == AST_INT) {
+                                    emit_mov_immediate(codegen, "x2", left->data.int_value);
+                                } else if (left->type == AST_IDENTIFIER) {
+                                    emit_load_variable(codegen, "x2", left->data.string_value, symbols);
+                                } else if (left->type == AST_LIST) {
+                                    generate_expression(codegen, left, symbols);
+                                    emit_code(codegen, "    mov   x2, x0\n");
+                                }
+                                
+                                // Load right operand into x3
+                                if (right->type == AST_INT) {
+                                    emit_mov_immediate(codegen, "x3", right->data.int_value);
+                                } else if (right->type == AST_IDENTIFIER) {
+                                    emit_load_variable(codegen, "x3", right->data.string_value, symbols);
+                                } else if (right->type == AST_LIST) {
+                                    generate_expression(codegen, right, symbols);
+                                    emit_code(codegen, "    mov   x3, x0\n");
+                                }
                             }
                             
                             // Perform operation
@@ -610,7 +708,9 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                         reg_index++;
                                     }
                                 } else if (arg->type == AST_LIST) {
-                                    generate_expression(codegen, arg, symbols);
+                                    // For complex expressions inside function calls, we need to account for stack adjustment
+                                    // The stack pointer has moved due to the stp instruction above
+                                    generate_expression_with_adjustment(codegen, arg, symbols, 16);
                                     emit_code(codegen, "    mov   x%d, x0\n", reg_index);
                                     reg_index++;
                                 }
