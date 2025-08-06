@@ -1,14 +1,12 @@
 #include "tokenizer.h"
 #include <ctype.h>
 
-// Keywords from the Python tokenizer
 static const char *keywords[] = {
-    "int", "str", "let", "bool", "char", "type",
+    "int", "str", "let", "bool", "char", "struct",
     "set", "fn", "ret", "if", "else", "while",
     NULL
 };
 
-// Operators from the Python tokenizer
 static const char *operators[] = {
     "+", "-", "*", "/", "%", "**", "!", "~", ".",
     "<", ">", "|", "&", "=",
@@ -42,7 +40,7 @@ bool is_alpha(char c) {
     return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
 }
 
-bool is_alnum_or_underscore(char c) {
+bool is_ident(char c) {
     return is_digit(c) || is_alpha(c) || c == '_';
 }
 
@@ -104,7 +102,7 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle comments
+        // comments
         if (c == '/' && idx + 1 < len && source[idx + 1] == '/') {
             int start_idx = idx;
             idx += 2; // Skip "//"
@@ -122,13 +120,13 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle parentheses
         if (c == '(') {
             token_array_add(tokens, create_token(TOKEN_LPAREN, "(", line, column));
             column++;
             idx++;
             continue;
         }
+
         if (c == ')') {
             token_array_add(tokens, create_token(TOKEN_RPAREN, ")", line, column));
             column++;
@@ -136,7 +134,6 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle brackets
         if (c == '[') {
             token_array_add(tokens, create_token(TOKEN_LBRACKET, "[", line, column));
             column++;
@@ -150,7 +147,6 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle quote
         if (c == '\'') {
             token_array_add(tokens, create_token(TOKEN_QUOTE, "quote", line, column));
             column++;
@@ -158,15 +154,15 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle string literals
+        // string literals
         if (c == '"') {
             int start_idx = idx;
-            idx++; // Skip opening quote
+            idx++; // opening quote
             column++;
             
             while (idx < len && source[idx] != '"') {
                 if (source[idx] == '\\' && idx + 1 < len) {
-                    idx += 2; // Skip escape sequence
+                    idx += 2; // escape sequence
                     column += 2;
                 } else {
                     idx++;
@@ -175,7 +171,7 @@ TokenArray *tokenize(const char *source) {
             }
             
             if (idx < len) {
-                idx++; // Skip closing quote
+                idx++; // closing quote
                 column++;
             }
             
@@ -189,7 +185,7 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle character literals (#\c format)
+        // character literals scheme style - `#\c`
         if (c == '#' && idx + 1 < len && source[idx + 1] == '\\' && idx + 2 < len) {
             char char_value = source[idx + 2];
             char char_str[4] = {'#', '\\', char_value, '\0'};
@@ -199,7 +195,7 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle struct literals and other # constructs
+        // struct literals and other # constructs
         if (c == '#' && idx + 1 < len && source[idx + 1] == '(') {
             token_array_add(tokens, create_token(TOKEN_OPERATOR, "#", line, column));
             column++;
@@ -207,7 +203,7 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle lone # character
+        // # character
         if (c == '#') {
             token_array_add(tokens, create_token(TOKEN_OPERATOR, "#", line, column));
             column++;
@@ -215,7 +211,7 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle numbers
+        // numbers
         if (is_digit(c)) {
             int start_idx = idx;
             while (idx < len && is_digit(source[idx])) {
@@ -233,7 +229,7 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle operators (check longer operators first)
+        // operators (maximal munch)
         bool found_operator = false;
         for (int op_len = 2; op_len >= 1 && !found_operator; op_len--) {
             if (idx + op_len <= len) {
@@ -254,10 +250,10 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Handle identifiers and keywords
+        // ids
         if (is_alpha(c) || c == '_') {
             int start_idx = idx;
-            while (idx < len && is_alnum_or_underscore(source[idx])) {
+            while (idx < len && is_ident(source[idx])) {
                 idx++;
                 column++;
             }
@@ -273,7 +269,7 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // Skip whitespace
+        // whitespace
         if (is_whitespace(c)) {
             column++;
             idx++;
@@ -286,7 +282,7 @@ TokenArray *tokenize(const char *source) {
         idx++;
     }
 
-    // Add EOF token
+    // end of token stream
     token_array_add(tokens, create_token(TOKEN_EOF, NULL, line, column));
     
     return tokens;

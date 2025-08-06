@@ -67,34 +67,34 @@ bool match_value(Parser *parser, const char *value) {
 }
 
 ASTNode *parse_array_literal(Parser *parser) {
-    // Consume '['
+    // consume '['
     next_token(parser);
     
     ASTNode *array = create_ast_node(AST_ARRAY);
     
     while (!match_token(parser, TOKEN_RBRACKET) && !match_token(parser, TOKEN_EOF)) {
-        ASTNode *element = parse_expression(parser);
+        ASTNode *element = parse_exp(parser);
         if (element) {
             add_ast_child(array, element);
         }
     }
     
     if (match_token(parser, TOKEN_RBRACKET)) {
-        next_token(parser); // Consume ']'
+        next_token(parser); // consume ']'
     }
     
     return array;
 }
 
-ASTNode *parse_s_expression(Parser *parser) {
-    // Consume '('
+ASTNode *parse_sexp(Parser *parser) {
+    // consume '('
     next_token(parser);
     
     ASTNode *list = create_ast_node(AST_LIST);
     
-    // Handle function definitions: (fn [...] ...)
+    // function definitions: (fn [...] ...)
     if (match_value(parser, "fn") && peek_token(parser)->type == TOKEN_LBRACKET) {
-        // Add 'fn' token
+        // 'fn' token
         ASTNode *fn_node = create_ast_node(AST_IDENTIFIER);
         fn_node->data.string_value = strdup("fn");
         add_ast_child(list, fn_node);
@@ -107,7 +107,7 @@ ASTNode *parse_s_expression(Parser *parser) {
         while (!match_token(parser, TOKEN_RBRACKET) && !match_token(parser, TOKEN_EOF)) {
             if (match_token(parser, TOKEN_LPAREN)) {
                 // Parameter: (name type)
-                ASTNode *param = parse_s_expression(parser);
+                ASTNode *param = parse_sexp(parser);
                 add_ast_child(params, param);
             } else {
                 next_token(parser);
@@ -119,17 +119,17 @@ ASTNode *parse_s_expression(Parser *parser) {
         }
         add_ast_child(list, params);
         
-        // Parse return type and body
+        // return type and body
         while (!match_token(parser, TOKEN_RPAREN) && !match_token(parser, TOKEN_EOF)) {
-            ASTNode *expr = parse_expression(parser);
+            ASTNode *expr = parse_exp(parser);
             if (expr) {
                 add_ast_child(list, expr);
             }
         }
     } else {
-        // Regular s-expression
+        // s-expression
         while (!match_token(parser, TOKEN_RPAREN) && !match_token(parser, TOKEN_EOF)) {
-            ASTNode *expr = parse_expression(parser);
+            ASTNode *expr = parse_exp(parser);
             if (expr) {
                 add_ast_child(list, expr);
             }
@@ -137,16 +137,16 @@ ASTNode *parse_s_expression(Parser *parser) {
     }
     
     if (match_token(parser, TOKEN_RPAREN)) {
-        next_token(parser); // Consume ')'
+        next_token(parser); // consume ')'
     }
     
     return list;
 }
 
-ASTNode *parse_expression(Parser *parser) {
+ASTNode *parse_exp(Parser *parser) {
     Token *token = current_token(parser);
     
-    // Skip comments and newlines
+    // ignore comments and newlines
     while (token->type == TOKEN_COMMENT || token->type == TOKEN_NEWLINE) {
         next_token(parser);
         token = current_token(parser);
@@ -158,7 +158,7 @@ ASTNode *parse_expression(Parser *parser) {
     
     switch (token->type) {
         case TOKEN_LPAREN:
-            return parse_s_expression(parser);
+            return parse_sexp(parser);
             
         case TOKEN_LBRACKET:
             return parse_array_literal(parser);
@@ -192,19 +192,19 @@ ASTNode *parse_expression(Parser *parser) {
         case TOKEN_IDENTIFIER:
         case TOKEN_KEYWORD:
         case TOKEN_OPERATOR: {
-            // Handle struct literals: #((field value)...)
+            // struct literals: #((field value)...)
             if (match_value(parser, "#") && peek_token(parser)->type == TOKEN_LPAREN) {
                 next_token(parser); // consume '#'
                 
                 ASTNode *struct_literal = create_ast_node(AST_LIST);
                 
-                // Add struct literal marker
+                // mark struct literals
                 ASTNode *struct_op = create_ast_node(AST_IDENTIFIER);
                 struct_op->data.string_value = strdup("#");
                 add_ast_child(struct_literal, struct_op);
                 
-                // Parse the struct fields
-                ASTNode *fields = parse_s_expression(parser);
+                // struct fields
+                ASTNode *fields = parse_sexp(parser);
                 if (fields) {
                     add_ast_child(struct_literal, fields);
                 }
@@ -215,22 +215,22 @@ ASTNode *parse_expression(Parser *parser) {
             node->data.string_value = strdup(token->value);
             next_token(parser);
             
-            // Check for array indexing: identifier[expression]
+            // array indexing: identifier[expression]
             if (match_token(parser, TOKEN_LBRACKET)) {
                 next_token(parser); // consume '['
                 
                 ASTNode *index_expr = create_ast_node(AST_LIST);
                 
-                // Add array access operator
+                // array access operator
                 ASTNode *access_op = create_ast_node(AST_IDENTIFIER);
                 access_op->data.string_value = strdup("[]");
                 add_ast_child(index_expr, access_op);
                 
-                // Add the array variable
+                // array variable
                 add_ast_child(index_expr, node);
                 
-                // Parse the index expression
-                ASTNode *index = parse_expression(parser);
+                // index expression
+                ASTNode *index = parse_exp(parser);
                 if (index) {
                     add_ast_child(index_expr, index);
                 }
@@ -242,22 +242,22 @@ ASTNode *parse_expression(Parser *parser) {
                 return index_expr;
             }
             
-            // Check for field access: identifier.field
+            // field access: identifier.field
             if (match_value(parser, ".")) {
                 next_token(parser); // consume '.'
                 
                 if (match_token(parser, TOKEN_IDENTIFIER)) {
                     ASTNode *field_access = create_ast_node(AST_LIST);
                     
-                    // Add field access operator
+                    // field access operator
                     ASTNode *access_op = create_ast_node(AST_IDENTIFIER);
                     access_op->data.string_value = strdup(".");
                     add_ast_child(field_access, access_op);
                     
-                    // Add the struct variable
+                    // struct variable
                     add_ast_child(field_access, node);
                     
-                    // Add the field name
+                    // field name
                     ASTNode *field = create_ast_node(AST_IDENTIFIER);
                     field->data.string_value = strdup(current_token(parser)->value);
                     add_ast_child(field_access, field);
@@ -267,22 +267,22 @@ ASTNode *parse_expression(Parser *parser) {
                 }
             }
             
-            // Check for array type: type[size]
+            // array type: type[size]
             if (match_token(parser, TOKEN_LBRACKET)) {
                 next_token(parser); // consume '['
                 
                 ASTNode *array_type = create_ast_node(AST_LIST);
                 
-                // Add array type operator
+                // array type operator
                 ASTNode *type_op = create_ast_node(AST_IDENTIFIER);
                 type_op->data.string_value = strdup("array_type");
                 add_ast_child(array_type, type_op);
                 
-                // Add the base type
+                // base type
                 add_ast_child(array_type, node);
                 
-                // Parse the size expression
-                ASTNode *size = parse_expression(parser);
+                // size expression
+                ASTNode *size = parse_exp(parser);
                 if (size) {
                     add_ast_child(array_type, size);
                 }
@@ -298,7 +298,7 @@ ASTNode *parse_expression(Parser *parser) {
         }
         
         case TOKEN_QUOTE: {
-            // Handle quote specially - create a list with 'quote' and the next expression
+            // quote - create a list with 'quote' and the next expression
             next_token(parser); // consume 'quote'
             ASTNode *quote_list = create_ast_node(AST_LIST);
             
@@ -306,7 +306,7 @@ ASTNode *parse_expression(Parser *parser) {
             quote_symbol->data.string_value = strdup("quote");
             add_ast_child(quote_list, quote_symbol);
             
-            ASTNode *quoted_expr = parse_expression(parser);
+            ASTNode *quoted_expr = parse_exp(parser);
             if (quoted_expr) {
                 add_ast_child(quote_list, quoted_expr);
             }
@@ -315,9 +315,9 @@ ASTNode *parse_expression(Parser *parser) {
         }
         
         default:
-            // Skip unknown tokens
+            // unknown tokens -- TODO: should err?
             next_token(parser);
-            return parse_expression(parser);
+            return parse_exp(parser);
     }
 }
 
@@ -329,7 +329,7 @@ ASTNode *parse(TokenArray *tokens) {
     ASTNode *root = create_ast_node(AST_LIST);
     
     while (!match_token(&parser, TOKEN_EOF)) {
-        ASTNode *expr = parse_expression(&parser);
+        ASTNode *expr = parse_exp(&parser);
         if (expr) {
             add_ast_child(root, expr);
         }

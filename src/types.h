@@ -6,25 +6,23 @@
 #include <string.h>
 #include <stdbool.h>
 
-// Token types
 typedef enum {
-    TOKEN_LPAREN,
-    TOKEN_RPAREN,
-    TOKEN_LBRACKET,
-    TOKEN_RBRACKET,
-    TOKEN_QUOTE,
-    TOKEN_INT,
-    TOKEN_STRING,
-    TOKEN_CHAR,
-    TOKEN_IDENTIFIER,
-    TOKEN_KEYWORD,
-    TOKEN_OPERATOR,
-    TOKEN_COMMENT,
-    TOKEN_NEWLINE,
+    TOKEN_LPAREN,           // (
+    TOKEN_RPAREN,           // )
+    TOKEN_LBRACKET,         // [
+    TOKEN_RBRACKET,         // ]
+    TOKEN_QUOTE,            // '
+    TOKEN_INT,              // [0-9]*
+    TOKEN_STRING,           // [a-zA-Z0-9]*
+    TOKEN_CHAR,             // [a-z]?
+    TOKEN_IDENTIFIER,       // id
+    TOKEN_KEYWORD,          // keywords (struct etc.)
+    TOKEN_OPERATOR,         // +,-,*,/ etc.
+    TOKEN_COMMENT,          //
+    TOKEN_NEWLINE,          // \n
     TOKEN_EOF
 } TokenType;
 
-// Token structure
 typedef struct {
     TokenType type;
     char *value;
@@ -32,14 +30,12 @@ typedef struct {
     int column;
 } Token;
 
-// Dynamic array for tokens
 typedef struct {
     Token *tokens;
     size_t count;
     size_t capacity;
 } TokenArray;
 
-// AST node types
 typedef enum {
     AST_INT,
     AST_STRING,
@@ -49,7 +45,6 @@ typedef enum {
     AST_ARRAY
 } ASTNodeType;
 
-// AST node structure
 typedef struct ASTNode {
     ASTNodeType type;
     union {
@@ -64,7 +59,6 @@ typedef struct ASTNode {
     } data;
 } ASTNode;
 
-// Symbol table entry
 typedef enum {
     SYM_INT,
     SYM_STR,
@@ -95,22 +89,19 @@ typedef struct {
     ASTNode *init_value;
 } Symbol;
 
-// Struct field definition
 typedef struct {
     char *name;
     SymbolType type;
     ASTNode *default_value;
 } StructField;
 
-// Struct type definition
 typedef struct {
     char *name;
     StructField *fields;
-    size_t field_count;
-    size_t field_capacity;
+    size_t count;
+    size_t capacity;
 } StructType;
 
-// Struct type table
 typedef struct {
     StructType *types;
     size_t count;
@@ -121,10 +112,9 @@ typedef struct SymbolTable {
     Symbol *symbols;
     size_t count;
     size_t capacity;
-    struct SymbolTable *parent;  // Link to parent scope for hierarchical lookup
+    struct SymbolTable *parent; // parent scope lookup
 } SymbolTable;
 
-// Function prototypes
 TokenArray *tokenize(const char *source);
 void free_token_array(TokenArray *tokens);
 ASTNode *parse(TokenArray *tokens);
@@ -138,7 +128,6 @@ void free_struct_type_table(StructTypeTable *table);
 char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *struct_types);
 Symbol *find_symbol_recursive(SymbolTable *table, const char *name);
 
-// Utility functions
 ASTNode *create_ast_node(ASTNodeType type);
 void add_ast_child(ASTNode *parent, ASTNode *child);
 void token_array_add(TokenArray *array, Token token);

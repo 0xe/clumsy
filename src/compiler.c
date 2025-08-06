@@ -596,7 +596,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                         const char *field = field_name->data.string_value;
                                         int field_offset = -1;
                                         
-                                        for (size_t i = 0; i < struct_type->field_count; i++) {
+                                        for (size_t i = 0; i < struct_type->count; i++) {
                                             if (strcmp(struct_type->fields[i].name, field) == 0) {
                                                 field_offset = i * 8; // Each field is 8 bytes apart
                                                 break;
@@ -1413,8 +1413,8 @@ void add_struct_type(StructTypeTable *table, const char *name, StructField *fiel
     StructType *type = &table->types[table->count];
     type->name = strdup(name);
     type->fields = malloc(field_count * sizeof(StructField));
-    type->field_count = field_count;
-    type->field_capacity = field_count;
+    type->count = field_count;
+    type->capacity = field_count;
     
     // Copy fields
     for (size_t i = 0; i < field_count; i++) {
@@ -1442,7 +1442,7 @@ void free_struct_type_table(StructTypeTable *table) {
     
     for (size_t i = 0; i < table->count; i++) {
         free(table->types[i].name);
-        for (size_t j = 0; j < table->types[i].field_count; j++) {
+        for (size_t j = 0; j < table->types[i].count; j++) {
             free(table->types[i].fields[j].name);
         }
         free(table->types[i].fields);
