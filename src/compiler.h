@@ -9,6 +9,9 @@ typedef struct {
     size_t output_size;
     size_t output_capacity;
     int label_counter;
+    char **strings;
+    size_t string_count;
+    size_t string_capacity;
 } CodeGen;
 
 // Compiler functions
@@ -34,6 +37,9 @@ void generate_function_definitions(CodeGen *codegen, ASTNode *ast, SymbolTable *
 void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols);
 void generate_expression_with_adjustment(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols, int stack_adjustment);
 void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols);
+
+// Helper functions
+bool is_function_call(ASTNode *node, SymbolTable *symbols);
 
 // ARM64 instruction helpers
 void emit_mov_immediate(CodeGen *codegen, const char *reg, int value);

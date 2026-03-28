@@ -1,0 +1,8 @@
+// Test multi-argument C function calls (especially printf)
+
+(extern printf [*char int int int] int)
+
+(printf "=== Multi-argument test ===\n")
+(printf "Testing printf with multiple args:\n")
+(printf "Args: %d, %d, %d\n" 42 100 255)
+(printf "Test completed!\n")

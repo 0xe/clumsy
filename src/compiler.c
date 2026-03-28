@@ -21,6 +21,9 @@ CodeGen *create_codegen(void) {
     codegen->output[0] = '\0';
     codegen->output_size = 0;
     codegen->label_counter = 0;
+    codegen->strings = NULL;
+    codegen->string_count = 0;
+    codegen->string_capacity = 0;
     
     return codegen;
 }
@@ -85,9 +88,23 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
         for (size_t i = 0; i < ast->data.list.count; i++) {
             ASTNode *stmt = ast->data.list.children[i];
             
-            if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
+            if (stmt->type == AST_EXTERN_DECL) {
+                ASTNode *name_node = stmt->data.list.children[0];
+                ASTNode *params_node = stmt->data.list.children[1];
+
+                Symbol symbol;
+                symbol.name = strdup(name_node->data.string_value);
+                symbol.type = SYM_C_FUNCTION;
+                symbol.is_external = true;
+                symbol.c_library = NULL;
+                symbol.type_info.c_function.c_name = strdup(name_node->data.string_value);
+                symbol.type_info.c_function.return_type = SYM_INT;
+                symbol.type_info.c_function.param_count = params_node->data.list.count;
+                symbol.init_value = NULL;
+                add_symbol(table, symbol);
+            } else if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
                 ASTNode *op = stmt->data.list.children[0];
-                
+
                 if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
                     // Variable declaration
                     ASTNode *name_node = stmt->data.list.children[1];
@@ -165,7 +182,7 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
                         
                         add_symbol(table, symbol);
                     }
-                }
+}
             }
         }
     }
@@ -197,16 +214,20 @@ Symbol *find_symbol(SymbolTable *table, const char *name) {
 int get_symbol_offset(SymbolTable *table, const char *name) {
     int offset = 0;
     for (size_t i = 0; i < table->count; i++) {
+        // Functions don't have stack slots
+        if (table->symbols[i].type == SYM_FUNCTION ||
+            table->symbols[i].type == SYM_C_FUNCTION) {
+            continue;
+        }
         if (strcmp(table->symbols[i].name, name) == 0) {
             return offset;
         }
-        // Calculate space needed for this symbol
         if (table->symbols[i].type == SYM_ARRAY) {
-            offset += 32; // 4 elements × 8 bytes for arrays (assuming int[4])
+            offset += 32;
         } else if (table->symbols[i].type == SYM_STRUCT) {
-            offset += 16; // 2 fields × 8 bytes for structs  
+            offset += 16;
         } else {
-            offset += 8; // 8 bytes for regular variables
+            offset += 8;
         }
     }
     return -1; // Not found
@@ -457,16 +478,38 @@ void generate_expression_with_adjustment(CodeGen *codegen, ASTNode *expr, Symbol
 
 void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) {
     if (!expr) return;
-    
+
     switch (expr->type) {
         case AST_INT:
             emit_mov_immediate(codegen, "x0", expr->data.int_value);
             break;
-            
+
         case AST_CHAR:
             emit_mov_immediate(codegen, "x0", (int)expr->data.char_value);
             break;
-            
+
+        case AST_STRING: {
+            size_t string_index = codegen->string_count;
+            char *str_value = expr->data.string_value;
+            size_t str_len = strlen(str_value);
+            char *unquoted = malloc(str_len + 1);
+            if (str_value[0] == '"' && str_value[str_len - 1] == '"') {
+                strncpy(unquoted, str_value + 1, str_len - 2);
+                unquoted[str_len - 2] = '\0';
+            } else {
+                strcpy(unquoted, str_value);
+            }
+            if (codegen->string_count >= codegen->string_capacity) {
+                codegen->string_capacity = codegen->string_capacity == 0 ? 16 : codegen->string_capacity * 2;
+                codegen->strings = realloc(codegen->strings, codegen->string_capacity * sizeof(char *));
+            }
+            codegen->strings[codegen->string_count++] = unquoted;
+            emit_code(codegen, "    adrp   x9, str_%zu@PAGE\n", string_index);
+            emit_code(codegen, "    add    x9, x9, str_%zu@PAGEOFF\n", string_index);
+            emit_code(codegen, "    mov    x0, x9\n");
+            break;
+        }
+
         case AST_IDENTIFIER:
             emit_load_variable(codegen, "x0", expr->data.string_value, symbols);
             break;
@@ -653,7 +696,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                     else {
                         // Check if this is a function call using recursive symbol lookup
                         Symbol *func_symbol = find_symbol_recursive(symbols, op->data.string_value);
-                        if (func_symbol && func_symbol->type == SYM_FUNCTION) {
+                        if (func_symbol && (func_symbol->type == SYM_FUNCTION || func_symbol->type == SYM_C_FUNCTION)) {
                             // Generate function call
                             emit_code(codegen, "    // Function call: %s\n", op->data.string_value);
                             
@@ -664,7 +707,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             int arg_count = expr->data.list.count - 1; // Subtract 1 for function name
                             int reg_index = 0;
                             
-                            for (int i = 0; i < arg_count && reg_index < 4; i++) {
+                            for (int i = 0; i < arg_count && reg_index < 8; i++) {
                                 ASTNode *arg = expr->data.list.children[i + 1];
                                 if (arg->type == AST_INT) {
                                     emit_mov_immediate(codegen, "x9", arg->data.int_value);
@@ -681,7 +724,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                         emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                         reg_index++;
                                         // Copy field 1 (y) if we have register space
-                                        if (reg_index < 4) {
+                                        if (reg_index < 8) {
                                             emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 8 + 16);
                                             emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                             reg_index++;
@@ -690,7 +733,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                         // This is an array - copy all elements (assuming 4 elements for now)
                                         int array_offset = get_symbol_offset(symbols, arg->data.string_value);
                                         // Copy elements 0, 1, 2, 3
-                                        for (int elem = 0; elem < 4 && reg_index < 4; elem++) {
+                                        for (int elem = 0; elem < 4 && reg_index < 8; elem++) {
                                             emit_code(codegen, "    ldr   x9, [sp, #%d]\n", array_offset + elem * 8 + 16);
                                             emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                             reg_index++;
@@ -707,6 +750,26 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                         emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                         reg_index++;
                                     }
+                                } else if (arg->type == AST_STRING) {
+                                    size_t string_index = codegen->string_count;
+                                    char *str_value = arg->data.string_value;
+                                    size_t str_len = strlen(str_value);
+                                    char *unquoted = malloc(str_len + 1);
+                                    if (str_len >= 2 && str_value[0] == '"' && str_value[str_len - 1] == '"') {
+                                        strncpy(unquoted, str_value + 1, str_len - 2);
+                                        unquoted[str_len - 2] = '\0';
+                                    } else {
+                                        strcpy(unquoted, str_value);
+                                    }
+                                    if (codegen->string_count >= codegen->string_capacity) {
+                                        codegen->string_capacity = codegen->string_capacity == 0 ? 16 : codegen->string_capacity * 2;
+                                        codegen->strings = realloc(codegen->strings, codegen->string_capacity * sizeof(char *));
+                                    }
+                                    codegen->strings[codegen->string_count++] = unquoted;
+                                    emit_code(codegen, "    adrp   x9, str_%zu@PAGE\n", string_index);
+                                    emit_code(codegen, "    add    x9, x9, str_%zu@PAGEOFF\n", string_index);
+                                    emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                    reg_index++;
                                 } else if (arg->type == AST_LIST) {
                                     // For complex expressions inside function calls, we need to account for stack adjustment
                                     // The stack pointer has moved due to the stp instruction above
@@ -715,8 +778,16 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                     reg_index++;
                                 }
                             }
-                            
-                            emit_code(codegen, "    bl    %s\n", op->data.string_value);
+
+                            // Call the function with appropriate naming
+                            if (func_symbol->type == SYM_C_FUNCTION) {
+                                char *c_func_name = malloc(strlen(func_symbol->type_info.c_function.c_name) + 2);
+                                sprintf(c_func_name, "_%s", func_symbol->type_info.c_function.c_name);
+                                emit_code(codegen, "    bl    %s\n", c_func_name);
+                                free(c_func_name);
+                            } else {
+                                emit_code(codegen, "    bl    %s\n", op->data.string_value);
+                            }
                             
                             // Restore link register
                             emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
@@ -1021,16 +1092,155 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
             ASTNode *function_name = stmt->data.list.children[0];
             if (function_name->type == AST_IDENTIFIER) {
                 Symbol *func_symbol = find_symbol(symbols, function_name->data.string_value);
-                if (func_symbol && func_symbol->type == SYM_FUNCTION) {
+                if (!func_symbol) {
+                    fprintf(stderr, "error: call to undeclared function '%s'\n", function_name->data.string_value);
+                }
+                if (func_symbol && (func_symbol->type == SYM_FUNCTION || func_symbol->type == SYM_C_FUNCTION)) {
                     // Generate function call
                     emit_code(codegen, "    // Function call: %s\n", function_name->data.string_value);
                     
                     // Save link register
                     emit_code(codegen, "    stp   x29, x30, [sp, #-16]!\n");
                     
-                    // TODO: Handle function arguments properly
-                    // For now, just call the function
-                    emit_code(codegen, "    bl    %s\n", function_name->data.string_value);
+                    // Pass arguments to the function
+                    int arg_count = stmt->data.list.count - 1; // Subtract 1 for function name
+                    int reg_index = 0;
+                    
+                    for (int i = 0; i < arg_count && reg_index < 8; i++) {
+                        ASTNode *arg = stmt->data.list.children[i + 1];
+                        // Removed debug output
+                        if (arg->type == AST_INT) {
+                            emit_mov_immediate(codegen, "x9", arg->data.int_value);
+                            emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                            reg_index++;
+                        } else if (arg->type == AST_LIST && arg->data.list.count == 1) {
+                            // Handle wrapped string literals: ["string"]
+                            ASTNode *wrapped_content = arg->data.list.children[0];
+                            if (wrapped_content->type == AST_STRING) {
+                                // Handle string literals - collect and load address
+                                size_t string_index = codegen->string_count;
+                                
+                                // Strip quotes from string literal
+                                char *str_value = wrapped_content->data.string_value;
+                                char *unquoted_str = malloc(strlen(str_value) + 1);
+                                if (str_value[0] == '"' && str_value[strlen(str_value) - 1] == '"') {
+                                    strncpy(unquoted_str, str_value + 1, strlen(str_value) - 2);
+                                    unquoted_str[strlen(str_value) - 2] = '\0';
+                                } else {
+                                    strcpy(unquoted_str, str_value);
+                                }
+                                
+                                // Add string to collection
+                                if (codegen->string_count >= codegen->string_capacity) {
+                                    codegen->string_capacity = codegen->string_capacity == 0 ? 16 : codegen->string_capacity * 2;
+                                    codegen->strings = realloc(codegen->strings, codegen->string_capacity * sizeof(char*));
+                                    if (!codegen->strings) {
+                                        fprintf(stderr, "Error: Failed to allocate memory for strings\n");
+                                        exit(1);
+                                    }
+                                }
+                                
+                                codegen->strings[string_index] = unquoted_str;
+                                codegen->string_count++;
+                                
+                                // Load string address into register
+                                emit_code(codegen, "    // Load string address\n");
+                                emit_code(codegen, "    adrp   x9, str_%zu@PAGE\n", string_index);
+                                emit_code(codegen, "    add    x9, x9, str_%zu@PAGEOFF\n", string_index);
+                                emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                reg_index++;
+                            } else {
+                                // Not a string - treat as default
+                                emit_mov_immediate(codegen, "x9", 0);
+                                emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                reg_index++;
+                            }
+                        } else if (arg->type == AST_STRING) {
+                            // Handle string literals - collect and load address
+                            size_t string_index = codegen->string_count;
+                            
+                            // Strip quotes from string literal
+                            char *str_value = arg->data.string_value;
+                            char *unquoted_str = malloc(strlen(str_value) + 1);
+                            if (str_value[0] == '"' && str_value[strlen(str_value) - 1] == '"') {
+                                strncpy(unquoted_str, str_value + 1, strlen(str_value) - 2);
+                                unquoted_str[strlen(str_value) - 2] = '\0';
+                            } else {
+                                strcpy(unquoted_str, str_value);
+                            }
+                            
+                            // Add string to collection
+                            if (codegen->string_count >= codegen->string_capacity) {
+                                codegen->string_capacity = codegen->string_capacity == 0 ? 16 : codegen->string_capacity * 2;
+                                codegen->strings = realloc(codegen->strings, codegen->string_capacity * sizeof(char*));
+                                if (!codegen->strings) {
+                                    fprintf(stderr, "Error: Failed to allocate memory for strings\n");
+                                    exit(1);
+                                }
+                            }
+                            codegen->strings[codegen->string_count++] = unquoted_str;
+                            
+                            // Load string address
+                            emit_code(codegen, "    // Load string address\n");
+                            emit_code(codegen, "    adrp   x9, str_%zu@PAGE\n", string_index);
+                            emit_code(codegen, "    add    x9, x9, str_%zu@PAGEOFF\n", string_index);
+                            emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                            reg_index++;
+                        } else if (arg->type == AST_IDENTIFIER) {
+                            // Check if this is a struct or array variable by looking at symbol table
+                            Symbol *arg_symbol = find_symbol(symbols, arg->data.string_value);
+                            if (arg_symbol && arg_symbol->type == SYM_STRUCT) {
+                                // This is a struct - copy all fields (assuming 2 fields for now)
+                                int struct_offset = get_symbol_offset(symbols, arg->data.string_value);
+                                // Copy field 0 (x)
+                                emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 16);
+                                emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                reg_index++;
+                                // Copy field 1 (y) if we have register space
+                                if (reg_index < 8) {
+                                    emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 8 + 16);
+                                    emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                    reg_index++;
+                                }
+                            } else if (arg_symbol && arg_symbol->type == SYM_ARRAY) {
+                                // This is an array - copy all elements (assuming 4 elements for now)
+                                int array_offset = get_symbol_offset(symbols, arg->data.string_value);
+                                // Copy elements 0, 1, 2, 3
+                                for (int elem = 0; elem < 4 && reg_index < 8; elem++) {
+                                    emit_code(codegen, "    ldr   x9, [sp, #%d]\n", array_offset + elem * 8 + 16);
+                                    emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                    reg_index++;
+                                }
+                            } else {
+                                // Regular variable - need to account for stack pointer movement due to stp instruction
+                                int arg_offset = get_symbol_offset(symbols, arg->data.string_value);
+                                if (arg_offset >= 0) {
+                                    // Add 16 to offset to account for saved registers
+                                    emit_code(codegen, "    ldr   x9, [sp, #%d]\n", arg_offset + 16);
+                                } else {
+                                    emit_mov_immediate(codegen, "x9", 0);
+                                }
+                                emit_code(codegen, "    mov   x%d, x9\n", reg_index);
+                                reg_index++;
+                            }
+                        } else if (arg->type == AST_LIST) {
+                            // For complex expressions inside function calls, we need to account for stack adjustment
+                            // The stack pointer has moved due to the stp instruction above
+                            generate_expression_with_adjustment(codegen, arg, symbols, 16);
+                            emit_code(codegen, "    mov   x%d, x0\n", reg_index);
+                            reg_index++;
+                        }
+                    }
+                    
+                    // Call the function
+                    if (func_symbol->type == SYM_C_FUNCTION) {
+                        char *c_func_name = malloc(strlen(function_name->data.string_value) + 2);
+                        sprintf(c_func_name, "_%s", function_name->data.string_value);
+                        emit_code(codegen, "    bl    %s\n", c_func_name);
+                        free(c_func_name);
+                    } else {
+                        emit_code(codegen, "    bl    %s\n", function_name->data.string_value);
+                    }
                     
                     // Restore link register
                     emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
@@ -1071,7 +1281,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
             
             // First pass: analyze parameters and add to symbol table (don't store yet)
             int reg_index = 0;
-            for (int i = 0; i < param_count && reg_index < 4; i++) {
+            for (int i = 0; i < param_count && reg_index < 8; i++) {
                 ASTNode *param = params->data.list.children[i];
                 const char *param_name = NULL;
                 const char *param_type = NULL;
@@ -1135,12 +1345,16 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
             
             // Calculate and allocate stack space based on parameter types
             for (size_t i = 0; i < func_symbols->count; i++) {
+                if (func_symbols->symbols[i].type == SYM_FUNCTION ||
+                    func_symbols->symbols[i].type == SYM_C_FUNCTION) {
+                    continue;
+                }
                 if (func_symbols->symbols[i].type == SYM_ARRAY) {
-                    stack_space += 32; // 4 elements × 8 bytes for arrays (assuming int[4])
+                    stack_space += 32;
                 } else if (func_symbols->symbols[i].type == SYM_STRUCT) {
-                    stack_space += 16; // 2 fields × 8 bytes for structs  
+                    stack_space += 16;
                 } else {
-                    stack_space += 8; // 8 bytes for regular variables
+                    stack_space += 8;
                 }
             }
             if (stack_space % 16 != 0) {
@@ -1152,7 +1366,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
             
             // Second pass: store parameters from registers to stack
             reg_index = 0;
-            for (int i = 0; i < param_count && reg_index < 4; i++) {
+            for (int i = 0; i < param_count && reg_index < 8; i++) {
                 ASTNode *param = params->data.list.children[i];
                 const char *param_name = NULL;
                 const char *param_type = NULL;
@@ -1184,13 +1398,13 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                         // Store struct fields
                         emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
                         reg_index++;
-                        if (reg_index < 4) {
+                        if (reg_index < 8) {
                             emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
                             reg_index++;
                         }
                     } else if (param_type && (strstr(param_type, "[") != NULL || strcmp(param_type, "array") == 0)) {
                         // Store array elements
-                        for (int elem = 0; elem < 4 && reg_index < 4; elem++) {
+                        for (int elem = 0; elem < 4 && reg_index < 8; elem++) {
                             emit_code(codegen, "    str   x%d, [sp, #%d]\n", reg_index, reg_index * 8);
                             reg_index++;
                         }
@@ -1243,6 +1457,18 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
     emit_code(codegen, "\n");
 }
 
+// Helper function to check if an AST node is a function call
+bool is_function_call(ASTNode *node, SymbolTable *symbols) {
+    if (node->type == AST_LIST && node->data.list.count > 0) {
+        ASTNode *first = node->data.list.children[0];
+        if (first->type == AST_IDENTIFIER) {
+            Symbol *func_symbol = find_symbol(symbols, first->data.string_value);
+            return func_symbol && (func_symbol->type == SYM_FUNCTION || func_symbol->type == SYM_C_FUNCTION);
+        }
+    }
+    return false;
+}
+
 void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols) {
     // Generate main function
     emit_code(codegen, "_main:\n");
@@ -1251,15 +1477,19 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
     emit_code(codegen, "    stp   x29, x30, [sp, #-16]!\n");
     emit_code(codegen, "    mov   x29, sp\n");
     
-    // Calculate stack space needed
+    // Calculate stack space needed (functions don't get stack slots)
     int stack_space = 0;
     for (size_t i = 0; i < symbols->count; i++) {
+        if (symbols->symbols[i].type == SYM_FUNCTION ||
+            symbols->symbols[i].type == SYM_C_FUNCTION) {
+            continue;
+        }
         if (symbols->symbols[i].type == SYM_ARRAY) {
-            stack_space += 32; // 4 elements × 8 bytes for arrays (assuming int[4])
+            stack_space += 32;
         } else if (symbols->symbols[i].type == SYM_STRUCT) {
-            stack_space += 16; // 2 fields × 8 bytes for structs  
+            stack_space += 16;
         } else {
-            stack_space += 8; // 8 bytes for regular variables
+            stack_space += 8;
         }
     }
     if (stack_space % 16 != 0) {
@@ -1271,10 +1501,11 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
         emit_code(codegen, "    sub   sp, sp, #%d\n", stack_space);
     }
     
-    // Generate code for each statement (skip function definitions)
+// Generate code for each statement (skip function definitions)
     // Also find the final expression to use as exit code
     ASTNode *final_expr = NULL;
     if (ast->type == AST_LIST) {
+        // Process all statements in order
         for (size_t i = 0; i < ast->data.list.count; i++) {
             ASTNode *stmt = ast->data.list.children[i];
             
@@ -1282,6 +1513,7 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
             bool is_function_def = false;
             if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
                 ASTNode *op = stmt->data.list.children[0];
+                
                 if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
                     ASTNode *init_value = (stmt->data.list.count >= 4) ? stmt->data.list.children[3] : NULL;
                     if (init_value && init_value->type == AST_LIST && 
@@ -1297,6 +1529,7 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
             if (!is_function_def) {
                 generate_statement(codegen, stmt, symbols);
                 // If this is not a statement (no operator), it's an expression for exit code
+                // BUT don't use function calls as final expressions since they don't return meaningful exit codes
                 if (stmt->type == AST_IDENTIFIER || stmt->type == AST_INT || 
                     (stmt->type == AST_LIST && stmt->data.list.count > 0 && 
                      stmt->data.list.children[0]->type == AST_IDENTIFIER &&
@@ -1304,7 +1537,9 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
                       strcmp(stmt->data.list.children[0]->data.string_value, "set") != 0 &&
                       strcmp(stmt->data.list.children[0]->data.string_value, "print") != 0 &&
                       strcmp(stmt->data.list.children[0]->data.string_value, "if") != 0 &&
-                      strcmp(stmt->data.list.children[0]->data.string_value, "while") != 0))) {
+                      strcmp(stmt->data.list.children[0]->data.string_value, "while") != 0 &&
+                      // EXCLUDE function calls from being final expressions
+                      !is_function_call(stmt, symbols)))) {
                     final_expr = stmt;
                 }
             }
@@ -1343,7 +1578,7 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *stru
         generate_pow_function(codegen);
     }
     
-    // Generate all function definitions first
+// Generate all function definitions first
     if (ast->type == AST_LIST) {
         for (size_t i = 0; i < ast->data.list.count; i++) {
             ASTNode *stmt = ast->data.list.children[i];
@@ -1379,7 +1614,15 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *stru
     
     generate_main_function(codegen, ast, symbols);
     
-    // No longer need format strings since we use print helper functions
+    // Emit all collected string literals
+    if (codegen->string_count > 0) {
+        emit_code(codegen, "\n    .data\n");
+        for (size_t i = 0; i < codegen->string_count; i++) {
+            emit_code(codegen, "str_%zu:\n", i);
+            emit_code(codegen, "    .asciz  \"%s\"\n", codegen->strings[i]);
+        }
+        emit_code(codegen, "    .text\n");
+    }
     
     char *result = strdup(codegen->output);
     free_codegen(codegen);

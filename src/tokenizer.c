@@ -4,6 +4,7 @@
 static const char *keywords[] = {
     "int", "str", "let", "bool", "char", "struct",
     "set", "fn", "ret", "if", "else", "while",
+    "extern", "include", "null",
     NULL
 };
 
@@ -154,6 +155,44 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
+        // address-of operator &
+        if (c == '&') {
+            token_array_add(tokens, create_token(TOKEN_ADDRESS, "&", line, column));
+            column++;
+            idx++;
+            continue;
+        }
+
+        // pointer type declaration: *int, *char, etc.
+        if (c == '*' && idx + 1 < len && is_alpha(source[idx+1])) {
+            int start_idx = idx;
+            idx++; // skip '*'
+            column++;
+            
+            // Read the type name
+            while (idx < len && is_alpha(source[idx])) {
+                idx++;
+                column++;
+            }
+            
+            int type_len = idx - start_idx;
+            char *type_str = malloc(type_len + 1);
+            strncpy(type_str, source + start_idx, type_len);
+            type_str[type_len] = '\0';
+            
+            token_array_add(tokens, create_token(TOKEN_IDENTIFIER, type_str, line, column - type_len));
+            free(type_str);
+            continue;
+        }
+        
+        // dereference operator * (when not as part of multiplication or type declaration)
+        if (c == '*' && !(idx > 0 && is_digit(source[idx-1]))) {
+            token_array_add(tokens, create_token(TOKEN_DEREFERENCE, "*", line, column));
+            column++;
+            idx++;
+            continue;
+        }
+
         // string literals
         if (c == '"') {
             int start_idx = idx;
@@ -211,19 +250,28 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
-        // numbers
+        // numbers (decimal and hex 0x...)
         if (is_digit(c)) {
             int start_idx = idx;
-            while (idx < len && is_digit(source[idx])) {
-                idx++;
-                column++;
+            if (c == '0' && idx + 1 < len && (source[idx + 1] == 'x' || source[idx + 1] == 'X')) {
+                // hex literal
+                idx += 2; column += 2;
+                while (idx < len && (is_digit(source[idx]) ||
+                       (source[idx] >= 'a' && source[idx] <= 'f') ||
+                       (source[idx] >= 'A' && source[idx] <= 'F'))) {
+                    idx++; column++;
+                }
+            } else {
+                while (idx < len && is_digit(source[idx])) {
+                    idx++; column++;
+                }
             }
-            
+
             int num_len = idx - start_idx;
             char *num_str = malloc(num_len + 1);
             strncpy(num_str, source + start_idx, num_len);
             num_str[num_len] = '\0';
-            
+
             token_array_add(tokens, create_token(TOKEN_INT, num_str, line, column - num_len));
             free(num_str);
             continue;

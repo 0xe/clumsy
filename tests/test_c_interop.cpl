@@ -1,0 +1,30 @@
+// Test C-interop and pointer types
+
+// Declare C functions
+(extern printf [*char int] int)
+(extern malloc [int] *int)
+(extern free [*int] void)
+
+// Test pointer variable
+(let ptr *int null)
+(let x int 42)
+
+// Test address-of operator
+(set ptr &x)
+
+// Test dereference operator
+(let y int (* ptr))
+
+// Call C function
+(let result int (printf "Hello from C! x = %d, y = %d\n" x y))
+
+// Test malloc
+(let allocated *int (malloc 8))
+(if (!= allocated null)
+  (begin
+    (* allocated 100)
+    (printf "Allocated value: %d\n" (* allocated))
+    (free allocated))
+  (printf "Allocation failed\n"))
+
+(result)

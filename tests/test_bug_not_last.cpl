@@ -1,0 +1,7 @@
+// Test where function call is not the last statement
+
+(extern puts [*char] int)
+
+(puts "First call")
+(puts "Second call")
+(let x int 42)

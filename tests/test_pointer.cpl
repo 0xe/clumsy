@@ -1,0 +1,5 @@
+// Simple pointer test
+(let x int 42)
+(let ptr *int &x)
+(let y int *ptr)
+(print y)

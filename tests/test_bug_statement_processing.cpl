@@ -1,0 +1,6 @@
+// This test demonstrates the statement processing bug
+// A single puts call should be generated, but multiple are created
+
+(extern puts [*char] int)
+
+(puts "This should be called once")

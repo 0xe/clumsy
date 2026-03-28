@@ -1,8 +1,23 @@
+# Build
+build/
 *.o
 *.s
-tmp/
-cmake-build-debug/
-cmake-build-default/
-cmake-build-minsizerel/
-cmake-build-release/
-cmake-build-relwithdebinfo/
+
+# macOS
+.DS_Store
+.idea/
+
+# Compiled binaries (no extension, same name as .cpl)
+tests/test_*
+!tests/test_*.cpl
+!tests/test_*.expected
+
+# Compiled demo binaries (no extension)
+basics_only
+c_interop_demo
+real_tetris
+sdl_demo
+sdl_loop
+tcp_client
+tcp_server
+working_tetris

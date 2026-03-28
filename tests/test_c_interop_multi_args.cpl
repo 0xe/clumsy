@@ -1,0 +1,7 @@
+// Test multiple string arguments to puts calls
+
+(extern puts [*char] int)
+
+(puts "First call")
+(puts "Second call") 
+(puts "Third call")

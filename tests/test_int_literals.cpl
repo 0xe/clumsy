@@ -1,0 +1,10 @@
+// Test different types of integer literals
+(extern print_int [long] void)
+
+// Test various integer values
+(print_int 0)
+(print_int 1)
+(print_int 32)
+(print_int 42)
+(print_int 100)
+(print_int 255)

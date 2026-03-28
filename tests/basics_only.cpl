@@ -1,0 +1,13 @@
+// Simple test without SDL - just basic operations
+
+(extern printf [*char int] int)
+
+(let x int 42)
+(let y int 100)
+
+(printf "x = %d\n" x)
+(printf "y = %d\n" y)
+(printf "Sum = %d\n" (+ x y))
+
+(printf "Done.\n")
+)

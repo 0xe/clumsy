@@ -20,6 +20,10 @@ typedef enum {
     TOKEN_OPERATOR,         // +,-,*,/ etc.
     TOKEN_COMMENT,          //
     TOKEN_NEWLINE,          // \n
+    TOKEN_ADDRESS,          // &
+    TOKEN_DEREFERENCE,      // *
+    TOKEN_EXTERN,           // extern
+    TOKEN_INCLUDE,          // include
     TOKEN_EOF
 } TokenType;
 
@@ -42,7 +46,11 @@ typedef enum {
     AST_CHAR,
     AST_IDENTIFIER,
     AST_LIST,
-    AST_ARRAY
+    AST_ARRAY,
+    AST_EXTERN_DECL,
+    AST_INCLUDE_DECL,
+    AST_ADDRESS_OF,
+    AST_DEREFERENCE
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -66,12 +74,16 @@ typedef enum {
     SYM_BOOL,
     SYM_ARRAY,
     SYM_STRUCT,
-    SYM_FUNCTION
+    SYM_FUNCTION,
+    SYM_POINTER,
+    SYM_C_FUNCTION
 } SymbolType;
 
 typedef struct {
     char *name;
     SymbolType type;
+    bool is_external;  // for C functions
+    char *c_library;    // library name for external functions
     union {
         struct {
             SymbolType element_type;
@@ -85,6 +97,15 @@ typedef struct {
         struct {
             char *struct_type_name;
         } struct_instance;
+        struct {
+            SymbolType pointed_type;
+        } pointer;
+        struct {
+            char *c_name;      // actual C function name
+            SymbolType *param_types;
+            int param_count;
+            SymbolType return_type;
+        } c_function;
     } type_info;
     ASTNode *init_value;
 } Symbol;

@@ -8,7 +8,7 @@ ASTNode *create_ast_node(ASTNodeType type) {
     }
     node->type = type;
     
-    if (type == AST_LIST || type == AST_ARRAY) {
+    if (type == AST_LIST || type == AST_ARRAY || type == AST_EXTERN_DECL || type == AST_INCLUDE_DECL) {
         node->data.list.children = NULL;
         node->data.list.count = 0;
         node->data.list.capacity = 0;
@@ -18,7 +18,8 @@ ASTNode *create_ast_node(ASTNodeType type) {
 }
 
 void add_ast_child(ASTNode *parent, ASTNode *child) {
-    if (parent->type != AST_LIST && parent->type != AST_ARRAY) {
+    if (parent->type != AST_LIST && parent->type != AST_ARRAY &&
+        parent->type != AST_EXTERN_DECL && parent->type != AST_INCLUDE_DECL) {
         fprintf(stderr, "Error: Cannot add child to non-list/non-array AST node\n");
         return;
     }
@@ -69,10 +70,14 @@ bool match_value(Parser *parser, const char *value) {
 ASTNode *parse_array_literal(Parser *parser) {
     // consume '['
     next_token(parser);
-    
+
     ASTNode *array = create_ast_node(AST_ARRAY);
-    
-    while (!match_token(parser, TOKEN_RBRACKET) && !match_token(parser, TOKEN_EOF)) {
+
+    while (true) {
+        while (match_token(parser, TOKEN_NEWLINE) || match_token(parser, TOKEN_COMMENT)) {
+            next_token(parser);
+        }
+        if (match_token(parser, TOKEN_RBRACKET) || match_token(parser, TOKEN_EOF)) break;
         ASTNode *element = parse_exp(parser);
         if (element) {
             add_ast_child(array, element);
@@ -91,6 +96,80 @@ ASTNode *parse_sexp(Parser *parser) {
     next_token(parser);
     
     ASTNode *list = create_ast_node(AST_LIST);
+    
+    // extern declarations: (extern name [(param types)] return_type)
+    if (match_value(parser, "extern")) {
+        ASTNode *extern_node = create_ast_node(AST_EXTERN_DECL);
+        next_token(parser); // consume 'extern'
+        
+        // Parse function name
+        if (match_token(parser, TOKEN_IDENTIFIER)) {
+            ASTNode *name_node = create_ast_node(AST_IDENTIFIER);
+            name_node->data.string_value = strdup(current_token(parser)->value);
+            add_ast_child(extern_node, name_node);
+            next_token(parser);
+        }
+        
+        // Parse parameter list
+        if (match_token(parser, TOKEN_LBRACKET)) {
+            next_token(parser); // consume '['
+            ASTNode *params = create_ast_node(AST_LIST);
+            
+            while (!match_token(parser, TOKEN_RBRACKET) && !match_token(parser, TOKEN_EOF)) {
+                ASTNode *param = parse_exp(parser);
+                if (param) {
+                    add_ast_child(params, param);
+                }
+            }
+            
+            if (match_token(parser, TOKEN_RBRACKET)) {
+                next_token(parser); // consume ']'
+            }
+            add_ast_child(extern_node, params);
+        }
+        
+        // Parse return type
+        ASTNode *return_type = parse_exp(parser);
+        if (return_type) {
+            add_ast_child(extern_node, return_type);
+        }
+        
+        // Skip to closing parenthesis
+        while (!match_token(parser, TOKEN_RPAREN) && !match_token(parser, TOKEN_EOF)) {
+            next_token(parser);
+        }
+        
+        if (match_token(parser, TOKEN_RPAREN)) {
+            next_token(parser); // consume ')'
+        }
+        
+        return extern_node;
+    }
+    
+    // include declarations: (include "library.h")
+    if (match_value(parser, "include")) {
+        ASTNode *include_node = create_ast_node(AST_INCLUDE_DECL);
+        next_token(parser); // consume 'include'
+        
+        // Parse library name
+        if (match_token(parser, TOKEN_STRING)) {
+            ASTNode *lib_node = create_ast_node(AST_STRING);
+            lib_node->data.string_value = strdup(current_token(parser)->value);
+            add_ast_child(include_node, lib_node);
+            next_token(parser);
+        }
+        
+        // Skip to closing parenthesis
+        while (!match_token(parser, TOKEN_RPAREN) && !match_token(parser, TOKEN_EOF)) {
+            next_token(parser);
+        }
+        
+        if (match_token(parser, TOKEN_RPAREN)) {
+            next_token(parser); // consume ')'
+        }
+        
+        return include_node;
+    }
     
     // function definitions: (fn [...] ...)
     if (match_value(parser, "fn") && peek_token(parser)->type == TOKEN_LBRACKET) {
@@ -120,7 +199,11 @@ ASTNode *parse_sexp(Parser *parser) {
         add_ast_child(list, params);
         
         // return type and body
-        while (!match_token(parser, TOKEN_RPAREN) && !match_token(parser, TOKEN_EOF)) {
+        while (true) {
+            while (match_token(parser, TOKEN_NEWLINE) || match_token(parser, TOKEN_COMMENT)) {
+                next_token(parser);
+            }
+            if (match_token(parser, TOKEN_RPAREN) || match_token(parser, TOKEN_EOF)) break;
             ASTNode *expr = parse_exp(parser);
             if (expr) {
                 add_ast_child(list, expr);
@@ -128,7 +211,11 @@ ASTNode *parse_sexp(Parser *parser) {
         }
     } else {
         // s-expression
-        while (!match_token(parser, TOKEN_RPAREN) && !match_token(parser, TOKEN_EOF)) {
+        while (true) {
+            while (match_token(parser, TOKEN_NEWLINE) || match_token(parser, TOKEN_COMMENT)) {
+                next_token(parser);
+            }
+            if (match_token(parser, TOKEN_RPAREN) || match_token(parser, TOKEN_EOF)) break;
             ASTNode *expr = parse_exp(parser);
             if (expr) {
                 add_ast_child(list, expr);
@@ -165,7 +252,7 @@ ASTNode *parse_exp(Parser *parser) {
             
         case TOKEN_INT: {
             ASTNode *node = create_ast_node(AST_INT);
-            node->data.int_value = atoi(token->value);
+            node->data.int_value = (int)strtol(token->value, NULL, 0);
             next_token(parser);
             return node;
         }
@@ -186,6 +273,34 @@ ASTNode *parse_exp(Parser *parser) {
                 node->data.char_value = '\0';
             }
             next_token(parser);
+            return node;
+        }
+        
+        case TOKEN_ADDRESS: {
+            ASTNode *node = create_ast_node(AST_LIST);
+            ASTNode *op = create_ast_node(AST_IDENTIFIER);
+            op->data.string_value = strdup("&");
+            add_ast_child(node, op);
+            next_token(parser); // consume '&'
+            // Parse the operand
+            ASTNode *operand = parse_exp(parser);
+            if (operand) {
+                add_ast_child(node, operand);
+            }
+            return node;
+        }
+        
+        case TOKEN_DEREFERENCE: {
+            ASTNode *node = create_ast_node(AST_LIST);
+            ASTNode *op = create_ast_node(AST_IDENTIFIER);
+            op->data.string_value = strdup("*");
+            add_ast_child(node, op);
+            next_token(parser); // consume '*'
+            // Parse the operand
+            ASTNode *operand = parse_exp(parser);
+            if (operand) {
+                add_ast_child(node, operand);
+            }
             return node;
         }
         
@@ -349,14 +464,18 @@ void free_ast(ASTNode *node) {
             
         case AST_LIST:
         case AST_ARRAY:
+        case AST_EXTERN_DECL:
+        case AST_INCLUDE_DECL:
             for (size_t i = 0; i < node->data.list.count; i++) {
                 free_ast(node->data.list.children[i]);
             }
             free(node->data.list.children);
             break;
-            
+
         case AST_INT:
         case AST_CHAR:
+        case AST_ADDRESS_OF:
+        case AST_DEREFERENCE:
             // No dynamic memory to free
             break;
     }
@@ -391,6 +510,12 @@ void print_symbol_table(SymbolTable *symbols) {
                 break;
             case SYM_BOOL:
                 fprintf(stderr, "bool");
+                break;
+            case SYM_POINTER:
+                fprintf(stderr, "pointer");
+                break;
+            case SYM_C_FUNCTION:
+                fprintf(stderr, "c_function");
                 break;
             case SYM_ARRAY:
                 fprintf(stderr, "array[%d] of ", sym->type_info.array.size);

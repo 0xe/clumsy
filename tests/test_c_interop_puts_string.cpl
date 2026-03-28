@@ -1,0 +1,5 @@
+// Test with puts instead of printf to avoid built-in conflicts
+
+(extern puts [*char] int)
+
+(puts "Hello from C puts!")

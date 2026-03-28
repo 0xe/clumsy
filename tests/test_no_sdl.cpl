@@ -1,0 +1,8 @@
+// Test without calling SDL_Init
+(extern puts [*char] int)
+(extern SDL_Init [uint32_t] int)
+
+(puts "This should work")
+// Comment out SDL_Init for now
+//(SDL_Init 0)
+(puts "This should also work")
