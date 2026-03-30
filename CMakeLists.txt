@@ -93,6 +93,19 @@ foreach(test_file ${TEST_FILES})
     )
 endforeach()
 
+# Static analysis target
+find_program(CLANG_ANALYZER clang)
+if(CLANG_ANALYZER)
+    add_custom_target(analyze
+            COMMAND ${CLANG_ANALYZER} --analyze
+                    -Xanalyzer -analyzer-output=text
+                    -I ${CMAKE_SOURCE_DIR}/src
+                    ${SOURCES}
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            COMMENT "Running clang static analyzer"
+    )
+endif()
+
 # Clean target (CMake handles this automatically, but we can add custom cleanup)
 add_custom_target(clean-all
         COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/tmp

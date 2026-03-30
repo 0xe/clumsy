@@ -133,6 +133,7 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
                                     symbol.type = SYM_BOOL;
                                 } else if (strcmp(type_node->data.string_value, "struct") == 0) {
                                     // Skip struct type definitions, they don't create variables
+                                    free(symbol.name);
                                     continue;
                                 } else {
                                     // This might be a user-defined struct type name
@@ -848,7 +849,7 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                         if (fields_list->type == AST_LIST) {
                             // Create struct fields array
                             size_t field_count = fields_list->data.list.count;
-                            StructField *fields = malloc(field_count * sizeof(StructField));
+                            StructField *fields = calloc(field_count, sizeof(StructField));
                             
                             for (size_t i = 0; i < field_count; i++) {
                                 ASTNode *field = fields_list->data.list.children[i];
@@ -885,12 +886,11 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                                 global_struct_types = create_struct_type_table();
                             }
                             
-                            // Add struct type to table
                             add_struct_type(global_struct_types, name_node->data.string_value, fields, field_count);
                             
                             // Clean up temporary fields array (add_struct_type makes its own copy)
                             for (size_t i = 0; i < field_count; i++) {
-                                free(fields[i].name);
+                                if (fields[i].name) free(fields[i].name);
                             }
                             free(fields);
                         }
@@ -1661,7 +1661,7 @@ void add_struct_type(StructTypeTable *table, const char *name, StructField *fiel
     
     // Copy fields
     for (size_t i = 0; i < field_count; i++) {
-        type->fields[i].name = strdup(fields[i].name);
+        type->fields[i].name = fields[i].name ? strdup(fields[i].name) : NULL;
         type->fields[i].type = fields[i].type;
         type->fields[i].default_value = fields[i].default_value; // Shallow copy for now
     }

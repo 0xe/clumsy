@@ -94,9 +94,7 @@ ASTNode *parse_array_literal(Parser *parser) {
 ASTNode *parse_sexp(Parser *parser) {
     // consume '('
     next_token(parser);
-    
-    ASTNode *list = create_ast_node(AST_LIST);
-    
+
     // extern declarations: (extern name [(param types)] return_type)
     if (match_value(parser, "extern")) {
         ASTNode *extern_node = create_ast_node(AST_EXTERN_DECL);
@@ -171,6 +169,8 @@ ASTNode *parse_sexp(Parser *parser) {
         return include_node;
     }
     
+    ASTNode *list = create_ast_node(AST_LIST);
+
     // function definitions: (fn [...] ...)
     if (match_value(parser, "fn") && peek_token(parser)->type == TOKEN_LBRACKET) {
         // 'fn' token

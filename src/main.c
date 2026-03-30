@@ -22,6 +22,11 @@ char *read_file(const char *filename) {
     // Get file size
     fseek(file, 0, SEEK_END);
     long file_size = ftell(file);
+    if (file_size < 0) {
+        fprintf(stderr, "error: cannot determine size of '%s'\n", filename);
+        fclose(file);
+        exit(1);
+    }
     fseek(file, 0, SEEK_SET);
     
     // Allocate buffer and read file
@@ -88,13 +93,13 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    // If --debug flag is set, print AST and exit
+    // If --debug flag is set, print AST and symbol table
     if (debug) {
         fprintf(stderr, "ast:\n");
         print_ast(ast, 0);
         
-		fprintf(stderr, "symbol table:\n");
-		print_symbol_table(symbols);
+        fprintf(stderr, "symbol table:\n");
+        print_symbol_table(symbols);
     }
     
     // Compile to ARM64
