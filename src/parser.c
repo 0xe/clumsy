@@ -378,9 +378,9 @@ ASTNode *parse_exp(Parser *parser) {
         }
         
         default:
-            // unknown tokens -- TODO: should err?
-            next_token(parser);
-            return parse_exp(parser);
+            fprintf(stderr, "syntax error: unexpected token '%s' at line %d\n",
+                    token->value ? token->value : "(null)", token->line);
+            exit(1);
     }
 }
 

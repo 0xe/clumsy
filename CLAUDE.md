@@ -41,7 +41,8 @@ S-expression syntax. Every statement is a parenthesised form.
 
 ```clumsy
 (+ x 1)   (- a b)   (* x y)   (/ n 2)   (% n 2)
-(< a b)   (> a b)   (<= a b)  (>= a b)  (== a b)
+(< a b)   (> a b)   (<= a b)  (>= a b)  (= a b)
+(not (= a b))
 ```
 
 ### Control flow

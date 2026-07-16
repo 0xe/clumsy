@@ -354,7 +354,8 @@ void emit_load_variable_with_adjustment(CodeGen *codegen, const char *reg, const
     if (offset >= 0) {
         emit_code(codegen, "    ldr   %s, [sp, #%d]\n", reg, offset + stack_adjustment);
     } else {
-        emit_code(codegen, "    mov   %s, #0  // Error: undefined variable %s\n", reg, var_name);
+        fprintf(stderr, "error: undeclared variable '%s'\n", var_name);
+        exit(1);
     }
 }
 
@@ -363,7 +364,8 @@ void emit_store_variable(CodeGen *codegen, const char *reg, const char *var_name
     if (offset >= 0) {
         emit_code(codegen, "    str   %s, [sp, #%d]\n", reg, offset);
     } else {
-        emit_code(codegen, "    // Error: undefined variable %s\n", var_name);
+        fprintf(stderr, "error: undeclared variable '%s'\n", var_name);
+        exit(1);
     }
 }
 
@@ -384,7 +386,7 @@ void emit_arithmetic(CodeGen *codegen, const char *op, const char *dest, const c
         emit_code(codegen, "    mov   x1, %s\n", src2);
         emit_code(codegen, "    bl    pow\n");
         emit_code(codegen, "    mov   %s, x0\n", dest);
-    } else if (strcmp(op, "==") == 0) {
+    } else if (strcmp(op, "=") == 0) {
         emit_code(codegen, "    cmp   %s, %s\n", src1, src2);
         emit_code(codegen, "    cset  %s, eq\n", dest);
     } else if (strcmp(op, "<") == 0) {
@@ -430,7 +432,7 @@ void generate_expression_with_adjustment(CodeGen *codegen, ASTNode *expr, Symbol
                         strcmp(op->data.string_value, "/") == 0 ||
                         strcmp(op->data.string_value, "%") == 0 ||
                         strcmp(op->data.string_value, "**") == 0 ||
-                        strcmp(op->data.string_value, "==") == 0 ||
+                        strcmp(op->data.string_value, "=") == 0 ||
                         strcmp(op->data.string_value, "<") == 0 ||
                         strcmp(op->data.string_value, ">") == 0 ||
                         strcmp(op->data.string_value, "<=") == 0 ||
@@ -485,6 +487,13 @@ void generate_expression_with_adjustment(CodeGen *codegen, ASTNode *expr, Symbol
                         } else {
                             emit_mov_immediate(codegen, "x0", 0);
                         }
+                    }
+                    // Handle logical not: (not expr)
+                    else if (strcmp(op->data.string_value, "not") == 0 && expr->data.list.count == 2) {
+                        ASTNode *operand = expr->data.list.children[1];
+                        generate_expression_with_adjustment(codegen, operand, symbols, stack_adjustment);
+                        emit_code(codegen, "    cmp   x0, #0\n");
+                        emit_code(codegen, "    cset  x0, eq\n");
                     }
                     // For other operations, fall back to normal expression generation
                     else {
@@ -550,7 +559,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                         strcmp(op->data.string_value, "/") == 0 ||
                         strcmp(op->data.string_value, "%") == 0 ||
                         strcmp(op->data.string_value, "**") == 0 ||
-                        strcmp(op->data.string_value, "==") == 0 ||
+                        strcmp(op->data.string_value, "=") == 0 ||
                         strcmp(op->data.string_value, "<") == 0 ||
                         strcmp(op->data.string_value, ">") == 0 ||
                         strcmp(op->data.string_value, "<=") == 0 ||
@@ -622,6 +631,13 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                         } else {
                             emit_mov_immediate(codegen, "x0", 0);
                         }
+                    }
+                    // Handle logical not: (not expr)
+                    else if (strcmp(op->data.string_value, "not") == 0 && expr->data.list.count == 2) {
+                        ASTNode *operand = expr->data.list.children[1];
+                        generate_expression(codegen, operand, symbols);
+                        emit_code(codegen, "    cmp   x0, #0\n");
+                        emit_code(codegen, "    cset  x0, eq\n");
                     }
                     // Handle array access: ([] array_var index)
                     else if (strcmp(op->data.string_value, "[]") == 0) {
@@ -837,8 +853,8 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             // Restore link register
                             emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
                         } else {
-                            // Unknown function or identifier, return 0
-                            emit_mov_immediate(codegen, "x0", 0);
+                            fprintf(stderr, "error: undeclared function '%s'\n", op->data.string_value);
+                            exit(1);
                         }
                     }
                 }
@@ -1136,9 +1152,6 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
             ASTNode *function_name = stmt->data.list.children[0];
             if (function_name->type == AST_IDENTIFIER) {
                 Symbol *func_symbol = find_symbol(symbols, function_name->data.string_value);
-                if (!func_symbol) {
-                    fprintf(stderr, "error: call to undeclared function '%s'\n", function_name->data.string_value);
-                }
                 if (func_symbol && (func_symbol->type == SYM_FUNCTION || func_symbol->type == SYM_C_FUNCTION)) {
                     // Generate function call
                     emit_code(codegen, "    // Function call: %s\n", function_name->data.string_value);
@@ -1559,7 +1572,8 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
                 ASTNode *op = stmt->data.list.children[0];
                 
                 if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
-                    ASTNode *init_value = (stmt->data.list.count >= 4) ? stmt->data.list.children[3] : NULL;
+                    ASTNode *init_value = (stmt->data.list.count >= 4) ? stmt->data.list.children[3] : 
+                                          (stmt->data.list.count == 3) ? stmt->data.list.children[2] : NULL;
                     if (init_value && init_value->type == AST_LIST && 
                         init_value->data.list.count >= 3) {
                         ASTNode *fn_node = init_value->data.list.children[0];
