@@ -141,12 +141,14 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
                                     symbol.type_info.struct_instance.struct_type_name = strdup(type_node->data.string_value);
                                 }
                             } else if (type_node->type == AST_LIST && type_node->data.list.count >= 2) {
-                                // Handle array types: (array_type int 4) or ([] int 4)
-                                ASTNode *array_op = type_node->data.list.children[0];
-                                if (array_op->type == AST_IDENTIFIER && 
-                                    (strcmp(array_op->data.string_value, "array_type") == 0 ||
-                                     strcmp(array_op->data.string_value, "[]") == 0)) {
-                                    symbol.type = SYM_ARRAY; // Properly set as array type
+                                ASTNode *type_op = type_node->data.list.children[0];
+                                if (type_op->type == AST_IDENTIFIER && 
+                                    (strcmp(type_op->data.string_value, "array_type") == 0 ||
+                                     strcmp(type_op->data.string_value, "[]") == 0)) {
+                                    symbol.type = SYM_ARRAY;
+                                } else if (type_op->type == AST_IDENTIFIER && 
+                                           strcmp(type_op->data.string_value, "*") == 0) {
+                                    symbol.type = SYM_POINTER;
                                 } else {
                                     symbol.type = SYM_INT; // default
                                 }
@@ -462,6 +464,27 @@ void generate_expression_with_adjustment(CodeGen *codegen, ASTNode *expr, Symbol
                             // Perform operation
                             emit_arithmetic(codegen, op->data.string_value, "x0", "x2", "x3");
                         }
+                        // Handle dereference: (* ptr) — load value from address in ptr
+                        else if (strcmp(op->data.string_value, "*") == 0 && expr->data.list.count == 2) {
+                            ASTNode *operand = expr->data.list.children[1];
+                            generate_expression_with_adjustment(codegen, operand, symbols, stack_adjustment);
+                            emit_code(codegen, "    ldr   x0, [x0]\n");
+                        }
+                    }
+                    // Handle address-of: (& x)
+                    else if (strcmp(op->data.string_value, "&") == 0 && expr->data.list.count == 2) {
+                        ASTNode *operand = expr->data.list.children[1];
+                        if (operand->type == AST_IDENTIFIER) {
+                            int offset = get_symbol_offset(symbols, operand->data.string_value);
+                            if (offset >= 0) {
+                                emit_code(codegen, "    mov   x0, sp\n");
+                                emit_code(codegen, "    add   x0, x0, #%d\n", offset + stack_adjustment);
+                            } else {
+                                emit_mov_immediate(codegen, "x0", 0);
+                            }
+                        } else {
+                            emit_mov_immediate(codegen, "x0", 0);
+                        }
                     }
                     // For other operations, fall back to normal expression generation
                     else {
@@ -577,6 +600,27 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             
                             // Perform operation
                             emit_arithmetic(codegen, op->data.string_value, "x0", "x2", "x3");
+                        }
+                        // Handle dereference: (* ptr) — load value from address in ptr
+                        else if (strcmp(op->data.string_value, "*") == 0 && expr->data.list.count == 2) {
+                            ASTNode *operand = expr->data.list.children[1];
+                            generate_expression(codegen, operand, symbols);
+                            emit_code(codegen, "    ldr   x0, [x0]\n");
+                        }
+                    }
+                    // Handle address-of: (& x) — compute stack address of x
+                    else if (strcmp(op->data.string_value, "&") == 0 && expr->data.list.count == 2) {
+                        ASTNode *operand = expr->data.list.children[1];
+                        if (operand->type == AST_IDENTIFIER) {
+                            int offset = get_symbol_offset(symbols, operand->data.string_value);
+                            if (offset >= 0) {
+                                emit_code(codegen, "    mov   x0, sp\n");
+                                emit_code(codegen, "    add   x0, x0, #%d\n", offset);
+                            } else {
+                                emit_mov_immediate(codegen, "x0", 0);
+                            }
+                        } else {
+                            emit_mov_immediate(codegen, "x0", 0);
                         }
                     }
                     // Handle array access: ([] array_var index)

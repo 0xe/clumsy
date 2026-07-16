@@ -8,7 +8,7 @@ ASTNode *create_ast_node(ASTNodeType type) {
     }
     node->type = type;
     
-    if (type == AST_LIST || type == AST_ARRAY || type == AST_EXTERN_DECL || type == AST_INCLUDE_DECL) {
+    if (type == AST_LIST || type == AST_ARRAY || type == AST_EXTERN_DECL) {
         node->data.list.children = NULL;
         node->data.list.count = 0;
         node->data.list.capacity = 0;
@@ -19,7 +19,7 @@ ASTNode *create_ast_node(ASTNodeType type) {
 
 void add_ast_child(ASTNode *parent, ASTNode *child) {
     if (parent->type != AST_LIST && parent->type != AST_ARRAY &&
-        parent->type != AST_EXTERN_DECL && parent->type != AST_INCLUDE_DECL) {
+        parent->type != AST_EXTERN_DECL) {
         fprintf(stderr, "Error: Cannot add child to non-list/non-array AST node\n");
         return;
     }
@@ -144,31 +144,6 @@ ASTNode *parse_sexp(Parser *parser) {
         return extern_node;
     }
     
-    // include declarations: (include "library.h")
-    if (match_value(parser, "include")) {
-        ASTNode *include_node = create_ast_node(AST_INCLUDE_DECL);
-        next_token(parser); // consume 'include'
-        
-        // Parse library name
-        if (match_token(parser, TOKEN_STRING)) {
-            ASTNode *lib_node = create_ast_node(AST_STRING);
-            lib_node->data.string_value = strdup(current_token(parser)->value);
-            add_ast_child(include_node, lib_node);
-            next_token(parser);
-        }
-        
-        // Skip to closing parenthesis
-        while (!match_token(parser, TOKEN_RPAREN) && !match_token(parser, TOKEN_EOF)) {
-            next_token(parser);
-        }
-        
-        if (match_token(parser, TOKEN_RPAREN)) {
-            next_token(parser); // consume ')'
-        }
-        
-        return include_node;
-    }
-    
     ASTNode *list = create_ast_node(AST_LIST);
 
     // function definitions: (fn [...] ...)
@@ -276,33 +251,6 @@ ASTNode *parse_exp(Parser *parser) {
             return node;
         }
         
-        case TOKEN_ADDRESS: {
-            ASTNode *node = create_ast_node(AST_LIST);
-            ASTNode *op = create_ast_node(AST_IDENTIFIER);
-            op->data.string_value = strdup("&");
-            add_ast_child(node, op);
-            next_token(parser); // consume '&'
-            // Parse the operand
-            ASTNode *operand = parse_exp(parser);
-            if (operand) {
-                add_ast_child(node, operand);
-            }
-            return node;
-        }
-        
-        case TOKEN_DEREFERENCE: {
-            ASTNode *node = create_ast_node(AST_LIST);
-            ASTNode *op = create_ast_node(AST_IDENTIFIER);
-            op->data.string_value = strdup("*");
-            add_ast_child(node, op);
-            next_token(parser); // consume '*'
-            // Parse the operand
-            ASTNode *operand = parse_exp(parser);
-            if (operand) {
-                add_ast_child(node, operand);
-            }
-            return node;
-        }
         
         case TOKEN_IDENTIFIER:
         case TOKEN_KEYWORD:
@@ -465,7 +413,7 @@ void free_ast(ASTNode *node) {
         case AST_LIST:
         case AST_ARRAY:
         case AST_EXTERN_DECL:
-        case AST_INCLUDE_DECL:
+
             for (size_t i = 0; i < node->data.list.count; i++) {
                 free_ast(node->data.list.children[i]);
             }
@@ -589,6 +537,9 @@ void print_ast(ASTNode *node, int indent) {
             for (size_t i = 0; i < node->data.list.count; i++) {
                 print_ast(node->data.list.children[i], indent + 2);
             }
+            break;
+        case AST_EXTERN_DECL:
+            fprintf(stderr, "%*sFUNCTION (%zu elements):\n", indent, "", node->data.list.count);
             break;
         default:
             fprintf(stderr, "%*sUNKNOWN TYPE: %d\n", indent, "", node->type);

@@ -1,5 +1,5 @@
 // Simple pointer test with explicit deref
 (let x int 42)
-(let ptr *int &x)
+(let ptr (* int) (& x))
 (let y int (* ptr))
 (print y)

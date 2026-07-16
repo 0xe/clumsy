@@ -1,4 +1,4 @@
 // Test deref in expression context
 (let x int 42)
-(let ptr *int &x)
+(let ptr (* int) (& x))
 (print (* ptr))

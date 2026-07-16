@@ -1,7 +1,5 @@
 // Final C-Interop and SDL Demo
 
-(include "sdl_bindings.cpl")
-
 ;; Test all implemented features
 (print "=== C-Interop and Pointer Test ===\n")
 

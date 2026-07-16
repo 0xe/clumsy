@@ -20,10 +20,7 @@ typedef enum {
     TOKEN_OPERATOR,         // +,-,*,/ etc.
     TOKEN_COMMENT,          //
     TOKEN_NEWLINE,          // \n
-    TOKEN_ADDRESS,          // &
-    TOKEN_DEREFERENCE,      // *
     TOKEN_EXTERN,           // extern
-    TOKEN_INCLUDE,          // include
     TOKEN_EOF
 } TokenType;
 
@@ -48,7 +45,6 @@ typedef enum {
     AST_LIST,
     AST_ARRAY,
     AST_EXTERN_DECL,
-    AST_INCLUDE_DECL,
     AST_ADDRESS_OF,
     AST_DEREFERENCE
 } ASTNodeType;
@@ -82,7 +78,7 @@ typedef enum {
 typedef struct {
     char *name;
     SymbolType type;
-    bool is_external;  // for C functions
+    bool is_external;   // hack for C functions (type == SYM_C_FUNCTION should be enough)
     char *c_library;    // library name for external functions
     union {
         struct {
@@ -138,14 +134,18 @@ typedef struct SymbolTable {
 
 TokenArray *tokenize(const char *source);
 void free_token_array(TokenArray *tokens);
+
 ASTNode *parse(TokenArray *tokens);
 void free_ast(ASTNode *node);
+
 SymbolTable *build_symbol_table(ASTNode *ast);
 void free_symbol_table(SymbolTable *table);
+
 StructTypeTable *create_struct_type_table();
 void add_struct_type(StructTypeTable *table, const char *name, StructField *fields, size_t field_count);
 StructType *find_struct_type(StructTypeTable *table, const char *name);
 void free_struct_type_table(StructTypeTable *table);
+
 char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *struct_types);
 Symbol *find_symbol_recursive(SymbolTable *table, const char *name);
 

@@ -1,7 +1,5 @@
 // Simple SDL Test - Demonstrate all C-interop features
 
-(include "sdl_bindings.cpl")
-
 // Test 1: Basic SDL setup and rendering
 (let window *void null)
 (let renderer *void null)

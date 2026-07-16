@@ -1,7 +1,5 @@
 // Working Tetris with C-interop
 
-(include "sdl_bindings.cpl")
-
 (extern printf [*char int] int)
 
 ;; Game Constants
