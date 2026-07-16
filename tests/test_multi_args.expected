@@ -1,0 +1,6 @@
+=== Multi-argument test ===
+Testing multiple calls:
+Arg 1: 42
+Arg 2: 100
+Arg 3: 255
+Test completed!
