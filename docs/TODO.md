@@ -4,25 +4,8 @@ Focus: preparing for the new codegen (IR → CFG/DFA → SSA → backends).
 
 ## Codegen-blocking
 
-- [ ] **`+16` stack adjustment scattered throughout compiler** — Every `bl` moves `sp` down 16
-  (`stp x29, x30, [sp, #-16]!`) and all variable loads inside that sequence manually add 16.
-  Fix by tracking `sp` displacement in `CodeGen`.
-
-- [ ] **`generate_expression_with_adjustment` duplication** — Near-identical copy of
-  `generate_expression` with a `stack_adjustment` parameter. Eliminate by tracking `sp` offset
-  in `CodeGen` instead.
-
-- [ ] **No lexical scoping / `let` inside `begin` broken** — `build_symbol_table` only scans
-  top-level statements. Any `let` inside a `begin` is invisible to codegen. Fix requires
-  recursing into nested blocks with child symbol tables.
-
-- [ ] **`**` exponentiation ABI** — Compiles `**` into a call to C `pow()`, passing ints in `x0`/`x1`.
-  C `pow` expects doubles in `d0`/`d1` and returns in `d0`, causing garbage outputs. Either
-  implement an integer power helper or convert operands to FP registers.
-
-- [ ] **Examples SIGSEGV at runtime** — Most examples compile and link but crash with
-  segfaults. Root causes: `+16` stack adjustment bugs, wrong calling convention,
-  incorrect struct/array field access.
+- [ ] **Examples SIGSEGV at runtime** — Some examples still crash with segfaults.
+  Remaining root causes under investigation.
 
 ## Cleanup
 
@@ -35,7 +18,7 @@ Focus: preparing for the new codegen (IR → CFG/DFA → SSA → backends).
 - [ ] **String arg handling copy-pasted** — `AST_STRING` in argument lists is handled with the
   same `strdup`/capacity-check block in at least two places.
 
-- [ ] **No dedicated `AST_FN` node** — Done. `fn` forms now use `AST_FN` with named fields.
+- [x] **No dedicated `AST_FN` node** — Done. `fn` forms now use `AST_FN` with named fields.
 
 ## Missing language features (for later)
 
