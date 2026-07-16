@@ -63,9 +63,25 @@
 - [ ] **No operator precedence** — All binary operators are prefix s-expressions, which is fine,
   but there is no infix sugar even for common cases.
 
-- [ ] **`(fn name ...)` syntax not supported** — The parser only recognizes anonymous functions
-  bound via `(let name (fn [...] type body))`. Standard named function syntax
-  `(fn name [...] type body)` is parsed as a generic list and discarded.
+## Language features
+
+- [ ] **Double/float support** — No floating-point types, registers, or codegen. All values are
+  integer. FP types (`double`, `float`) and ARM64 FP registers (`d0`-`d7`) would need to be
+  added end-to-end: tokenizer, parser, type system, codegen.
+
+- [ ] **Negative integer literals** — `-1` cannot be written directly; must use `(- 0 1)`. The
+  tokenizer only handles positive integers.
+
+- [ ] **Null/void types** — No `null` literal or `void` type in the type system. `null` is not
+  defined; users must use `0` as a null pointer.
+
+- [ ] **Bitwise operators** — No `&`, `|`, `^`, `~`, `<<`, `>>` operators.
+
+- [ ] **String operations** — No string concatenation, comparison, or length. Strings are only
+  usable as C function arguments.
+
+- [ ] **Modules/file inclusion** — Each file compiles in isolation. No `include` or `import`
+  mechanism (was considered and dropped in cleanup plan).
 
 - [ ] **Varargs calling convention** — Direct `printf` calls with format args produce garbage
   or crash. The compiler doesn't set `x8 = 0` (number of NEON args) before variadic calls,

@@ -14,7 +14,7 @@ A language that's statically typed and compiles to native code.
 (let age int 123)
 (let welcome str "hello world\n")
 (let initial char #\q)
-(let greeting *str &welcome)
+(let greeting (* str) (& welcome))
 
 // arrays
 (let firstNaturalNumbers int[4] [1 2 3 4])
@@ -29,7 +29,7 @@ firstNaturalNumbers[2]
 // variable mutation
 (set initial #\r)
 (let getA 
-    (fn getA () 
+    (fn () 
         char
         (begin
             // ...
@@ -62,7 +62,7 @@ firstNaturalNumbers[2]
 (functionExample 12 "hello" [1 3 5 7 9 11 13 15 17 19])
 
 // CONDITION
-(if (== age 123)
+(if (= age 123)
   // do something
   (print age)
 
@@ -101,7 +101,7 @@ something.initial
   | Function Calls          | ✅                |                |
   | Structs                 | ✅                |                |
   | Property Access (.)     | ✅                |                |
-  | C-Interop               | ❌                |                |
+  | C-Interop               | ✅                |                |
 
 
 ## TODO
@@ -112,9 +112,7 @@ something.initial
 
 ### features
 - null type, void type
-- pointer types
 - ffi with C
-- heap allocation
 - bitfields & operators
 
 ### misc

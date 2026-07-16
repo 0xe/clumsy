@@ -66,4 +66,6 @@ See `docs/TODO.md` for the full list of outstanding items including:
 - Hardcoded struct/array sizes in arg passing
 - Type checking
 - Varargs calling convention fix
-- `(fn name ...)` syntax support
+- Double/float type support
+- Negative integer literals
+- Null/void types
