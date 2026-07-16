@@ -63,7 +63,7 @@ Here is a breakdown of the bugs and incomplete features listed in `TODO.md` with
 | **No Type Checking** | The compiler generates assembly without verifying type compatibility. | **High** | **Medium**. Essential for language safety, though codegen can technically output untyped assembly. |
 | **`**` Exponentiation ABI** | Compiles `**` into a call to C `pow()`. Passes ints in `x0`/`x1` and reads result from `x0`. | **Critical** | **High**. Calls standard C `pow` which expects doubles in `d0`/`d1` and returns in `d0`, causing garbage outputs. |
 | **StructTypeTable always `NULL`** | `main.c` passes `NULL` to `compile_to_arm64`. | **Medium** | **Low**. Bypassed via a global variable hack in `compiler.c`. Should be passed cleanly. |
-| **No dedicated `AST_FN` node** | `fn` is parsed as `AST_LIST` instead of a dedicated AST node with fields. | **Medium** | **Medium**. Forces compiler to inspect list children string values (`"fn"`) to identify functions. |
+| **~~No dedicated `AST_FN` node~~** | ~~`fn` is parsed as `AST_LIST` instead of a dedicated AST node with fields.~~ **Resolved**: `AST_FN` node with named fields (`fn.params`, `fn.body`, etc.). | **Medium** | **Medium**. |
 | **`ret` return value** | Verification needed to ensure return values are in `x0` in all control-flow paths. | **Medium** | **Medium**. Essential for robust function return generation. |
 | **Negative integer literals** | Tokenizer lacks negative sign handling for integer constants. | **Medium** | **Medium**. Forces users to write `(- 0 1)` instead of `-1`. |
 | **Dead enum values** | Unused tokens like `TOKEN_EXTERN` in `types.h`. | **Low** | **Low**. Code cleanup item. |

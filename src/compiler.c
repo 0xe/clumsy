@@ -171,16 +171,11 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
                         }
                         
                         // Check if this is a function definition: (let name (fn ...))
-                        if (symbol.init_value && symbol.init_value->type == AST_LIST && 
-                            symbol.init_value->data.list.count >= 3) {
-                            ASTNode *fn_node = symbol.init_value->data.list.children[0];
-                            if (fn_node->type == AST_IDENTIFIER && strcmp(fn_node->data.string_value, "fn") == 0) {
-                                symbol.type = SYM_FUNCTION;
-                                // For now, set basic function info (can be expanded later)
-                                symbol.type_info.function.param_count = 0;
-                                symbol.type_info.function.param_types = NULL;
-                                symbol.type_info.function.return_type = SYM_INT; // default
-                            }
+                        if (symbol.init_value && symbol.init_value->type == AST_FN) {
+                            symbol.type = SYM_FUNCTION;
+                            symbol.type_info.function.param_count = symbol.init_value->data.fn.param_count;
+                            symbol.type_info.function.param_types = NULL;
+                            symbol.type_info.function.return_type = SYM_INT; // default
                         }
                         
                         add_symbol(table, symbol);
@@ -1328,10 +1323,9 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
     
     // Extract parameters and create local symbols
     int param_count = 0;
-    if (fn_node->data.list.count >= 2) {
-        ASTNode *params = fn_node->data.list.children[1];
-        if (params->type == AST_LIST || params->type == AST_ARRAY) {
-            param_count = params->data.list.count;
+    if (fn_node->type == AST_FN) {
+        param_count = fn_node->data.fn.param_count;
+        ASTNode **params = fn_node->data.fn.params;
             
             // Allocate stack space for parameters (calculate after processing all params)
             int stack_space = 0;
@@ -1339,7 +1333,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
             // First pass: analyze parameters and add to symbol table (don't store yet)
             int reg_index = 0;
             for (int i = 0; i < param_count && reg_index < 8; i++) {
-                ASTNode *param = params->data.list.children[i];
+                ASTNode *param = params[i];
                 const char *param_name = NULL;
                 const char *param_type = NULL;
                 
@@ -1424,7 +1418,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
             // Second pass: store parameters from registers to stack
             reg_index = 0;
             for (int i = 0; i < param_count && reg_index < 8; i++) {
-                ASTNode *param = params->data.list.children[i];
+                ASTNode *param = params[i];
                 const char *param_name = NULL;
                 const char *param_type = NULL;
                 
@@ -1473,12 +1467,10 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                 }
             }
         }
-    }
     
     // Generate function body with function-local symbols
-    if (fn_node->data.list.count >= 4) {
-        ASTNode *body = fn_node->data.list.children[3];
-        generate_statement(codegen, body, func_symbols);
+    if (fn_node->type == AST_FN && fn_node->data.fn.body) {
+        generate_statement(codegen, fn_node->data.fn.body, func_symbols);
     } else {
         // No body, return 0
         emit_mov_immediate(codegen, "x0", 0);
@@ -1574,12 +1566,8 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
                 if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
                     ASTNode *init_value = (stmt->data.list.count >= 4) ? stmt->data.list.children[3] : 
                                           (stmt->data.list.count == 3) ? stmt->data.list.children[2] : NULL;
-                    if (init_value && init_value->type == AST_LIST && 
-                        init_value->data.list.count >= 3) {
-                        ASTNode *fn_node = init_value->data.list.children[0];
-                        if (fn_node->type == AST_IDENTIFIER && strcmp(fn_node->data.string_value, "fn") == 0) {
-                            is_function_def = true;
-                        }
+                    if (init_value && init_value->type == AST_FN) {
+                        is_function_def = true;
                     }
                 }
             }
@@ -1658,12 +1646,8 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *stru
                     }
                     
                     // Check if this is a function definition
-                    if (init_value && init_value->type == AST_LIST && 
-                        init_value->data.list.count >= 3) {
-                        ASTNode *fn_node = init_value->data.list.children[0];
-                        if (fn_node->type == AST_IDENTIFIER && strcmp(fn_node->data.string_value, "fn") == 0) {
-                            generate_function_definition(codegen, name_node->data.string_value, init_value, symbols);
-                        }
+                    if (init_value && init_value->type == AST_FN) {
+                        generate_function_definition(codegen, name_node->data.string_value, init_value, symbols);
                     }
                 }
             }

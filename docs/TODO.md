@@ -20,9 +20,10 @@
   is silently consumed and parse recurses. Should error instead.~~ Fixed. Now prints syntax error
   with line number and exits.
 
-- [ ] **No dedicated `AST_FN` node** — `fn` forms are stored as plain `AST_LIST` nodes; the
-  compiler re-detects them by checking `children[0].value == "fn"`. Give `fn` its own node type
-  with named fields (params, return type, body).
+- [x] **No dedicated `AST_FN` node** — ~~`fn` forms are stored as plain `AST_LIST` nodes; the
+  compiler re-detects them by checking `children[0].value == "fn"`.~~ Fixed. `fn` forms now use
+  a dedicated `AST_FN` node with named fields: `fn.params`, `fn.param_count`, `fn.return_type`,
+  `fn.body`.
 
 - [ ] **`+16` stack adjustment scattered throughout compiler** — Every `bl` moves `sp` down 16
   (`stp x29, x30, [sp, #-16]!`) and all variable loads inside that sequence manually add 16.

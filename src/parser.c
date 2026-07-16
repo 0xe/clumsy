@@ -148,21 +148,25 @@ ASTNode *parse_sexp(Parser *parser) {
 
     // function definitions: (fn [...] ...)
     if (match_value(parser, "fn") && peek_token(parser)->type == TOKEN_LBRACKET) {
-        // 'fn' token
-        ASTNode *fn_node = create_ast_node(AST_IDENTIFIER);
-        fn_node->data.string_value = strdup("fn");
-        add_ast_child(list, fn_node);
+        ASTNode *fn_node = create_ast_node(AST_FN);
+        fn_node->data.fn.params = NULL;
+        fn_node->data.fn.param_count = 0;
+        fn_node->data.fn.return_type = NULL;
+        fn_node->data.fn.body = NULL;
         next_token(parser); // consume 'fn'
         
         // Parse parameter list
         next_token(parser); // consume '['
-        ASTNode *params = create_ast_node(AST_LIST);
+        size_t param_cap = 0;
         
         while (!match_token(parser, TOKEN_RBRACKET) && !match_token(parser, TOKEN_EOF)) {
             if (match_token(parser, TOKEN_LPAREN)) {
-                // Parameter: (name type)
                 ASTNode *param = parse_sexp(parser);
-                add_ast_child(params, param);
+                if (fn_node->data.fn.param_count >= param_cap) {
+                    param_cap = param_cap ? param_cap * 2 : 4;
+                    fn_node->data.fn.params = realloc(fn_node->data.fn.params, param_cap * sizeof(ASTNode *));
+                }
+                fn_node->data.fn.params[fn_node->data.fn.param_count++] = param;
             } else {
                 next_token(parser);
             }
@@ -171,9 +175,11 @@ ASTNode *parse_sexp(Parser *parser) {
         if (match_token(parser, TOKEN_RBRACKET)) {
             next_token(parser); // consume ']'
         }
-        add_ast_child(list, params);
         
-        // return type and body
+        // Collect return type and body
+        ASTNode **extras = NULL;
+        size_t extra_count = 0;
+        size_t extra_cap = 0;
         while (true) {
             while (match_token(parser, TOKEN_NEWLINE) || match_token(parser, TOKEN_COMMENT)) {
                 next_token(parser);
@@ -181,9 +187,38 @@ ASTNode *parse_sexp(Parser *parser) {
             if (match_token(parser, TOKEN_RPAREN) || match_token(parser, TOKEN_EOF)) break;
             ASTNode *expr = parse_exp(parser);
             if (expr) {
-                add_ast_child(list, expr);
+                if (extra_count >= extra_cap) {
+                    extra_cap = extra_cap ? extra_cap * 2 : 4;
+                    extras = realloc(extras, extra_cap * sizeof(ASTNode *));
+                }
+                extras[extra_count++] = expr;
             }
         }
+        // First extra child is return type, rest form the body
+        if (extra_count >= 1) {
+            fn_node->data.fn.return_type = extras[0];
+        }
+        if (extra_count >= 2) {
+            if (extra_count == 2) {
+                fn_node->data.fn.body = extras[1];
+            } else {
+                // Multiple body expressions — wrap in a begin block
+                ASTNode *begin = create_ast_node(AST_LIST);
+                ASTNode *begin_op = create_ast_node(AST_IDENTIFIER);
+                begin_op->data.string_value = strdup("begin");
+                add_ast_child(begin, begin_op);
+                for (size_t i = 1; i < extra_count; i++) {
+                    add_ast_child(begin, extras[i]);
+                }
+                fn_node->data.fn.body = begin;
+            }
+        }
+        free(extras);
+        
+        if (match_token(parser, TOKEN_RPAREN)) {
+            next_token(parser); // consume ')'
+        }
+        return fn_node;
     } else {
         // s-expression
         while (true) {
@@ -420,6 +455,15 @@ void free_ast(ASTNode *node) {
             free(node->data.list.children);
             break;
 
+        case AST_FN:
+            for (size_t i = 0; i < node->data.fn.param_count; i++) {
+                free_ast(node->data.fn.params[i]);
+            }
+            free(node->data.fn.params);
+            free_ast(node->data.fn.return_type);
+            free_ast(node->data.fn.body);
+            break;
+
         case AST_INT:
         case AST_CHAR:
         case AST_ADDRESS_OF:
@@ -540,6 +584,20 @@ void print_ast(ASTNode *node, int indent) {
             break;
         case AST_EXTERN_DECL:
             fprintf(stderr, "%*sFUNCTION (%zu elements):\n", indent, "", node->data.list.count);
+            break;
+        case AST_FN:
+            fprintf(stderr, "%*sFN (%zu params):\n", indent, "", node->data.fn.param_count);
+            for (size_t i = 0; i < node->data.fn.param_count; i++) {
+                print_ast(node->data.fn.params[i], indent + 2);
+            }
+            if (node->data.fn.return_type) {
+                fprintf(stderr, "%*s  return type:\n", indent, "");
+                print_ast(node->data.fn.return_type, indent + 4);
+            }
+            if (node->data.fn.body) {
+                fprintf(stderr, "%*s  body:\n", indent, "");
+                print_ast(node->data.fn.body, indent + 4);
+            }
             break;
         default:
             fprintf(stderr, "%*sUNKNOWN TYPE: %d\n", indent, "", node->type);

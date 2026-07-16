@@ -46,7 +46,8 @@ typedef enum {
     AST_ARRAY,
     AST_EXTERN_DECL,
     AST_ADDRESS_OF,
-    AST_DEREFERENCE
+    AST_DEREFERENCE,
+    AST_FN
 } ASTNodeType;
 
 typedef struct ASTNode {
@@ -60,6 +61,12 @@ typedef struct ASTNode {
             size_t count;
             size_t capacity;
         } list;
+        struct {
+            struct ASTNode **params;
+            size_t param_count;
+            struct ASTNode *return_type;
+            struct ASTNode *body;
+        } fn;
     } data;
 } ASTNode;
 
