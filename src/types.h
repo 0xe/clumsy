@@ -52,6 +52,7 @@ typedef enum {
 
 typedef struct ASTNode {
     ASTNodeType type;
+    struct SymbolTable *scope;  // For begin/if/while: child scope (set by build_symbol_table)
     union {
         int int_value;
         char *string_value;
@@ -111,6 +112,7 @@ typedef struct {
         } c_function;
     } type_info;
     ASTNode *init_value;
+    int stack_offset;  // absolute offset from sp within the current stack frame
 } Symbol;
 
 typedef struct {
@@ -137,6 +139,9 @@ typedef struct SymbolTable {
     size_t count;
     size_t capacity;
     struct SymbolTable *parent; // parent scope lookup
+    struct SymbolTable *first_child;
+    struct SymbolTable *next_sibling;
+    int next_offset;  // next available stack offset for non-function symbols
 } SymbolTable;
 
 TokenArray *tokenize(const char *source);

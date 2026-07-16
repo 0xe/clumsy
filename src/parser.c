@@ -7,6 +7,7 @@ ASTNode *create_ast_node(ASTNodeType type) {
         exit(1);
     }
     node->type = type;
+    node->scope = NULL;
     
     if (type == AST_LIST || type == AST_ARRAY || type == AST_EXTERN_DECL) {
         node->data.list.children = NULL;

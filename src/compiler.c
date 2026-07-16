@@ -24,6 +24,7 @@ CodeGen *create_codegen(void) {
     codegen->strings = NULL;
     codegen->string_count = 0;
     codegen->string_capacity = 0;
+    codegen->sp_displacement = 0;
     
     return codegen;
 }
@@ -71,6 +72,171 @@ char *new_label(CodeGen *codegen, const char *prefix) {
     return label;
 }
 
+static SymbolTable *create_child_scope(SymbolTable *parent) {
+    SymbolTable *child = malloc(sizeof(SymbolTable));
+    child->symbols = NULL;
+    child->count = 0;
+    child->capacity = 0;
+    child->parent = parent;
+    child->first_child = NULL;
+    child->next_sibling = NULL;
+    child->next_offset = parent->next_offset;
+    // Link as child of parent
+    if (!parent->first_child) {
+        parent->first_child = child;
+    } else {
+        SymbolTable *sibling = parent->first_child;
+        while (sibling->next_sibling) sibling = sibling->next_sibling;
+        sibling->next_sibling = child;
+    }
+    return child;
+}
+
+static void collect_symbols_from_stmt(ASTNode *stmt, SymbolTable *table);
+
+static void collect_symbols_from_block(ASTNode *block, SymbolTable *table) {
+    if (!block || block->type != AST_LIST) return;
+    for (size_t i = 0; i < block->data.list.count; i++) {
+        collect_symbols_from_stmt(block->data.list.children[i], table);
+    }
+}
+
+static void collect_symbols_from_stmt(ASTNode *stmt, SymbolTable *table) {
+    if (!stmt) return;
+
+    if (stmt->type == AST_EXTERN_DECL) {
+        ASTNode *name_node = stmt->data.list.children[0];
+        ASTNode *params_node = stmt->data.list.children[1];
+
+        Symbol symbol;
+        symbol.name = strdup(name_node->data.string_value);
+        symbol.type = SYM_C_FUNCTION;
+        symbol.is_external = true;
+        symbol.c_library = NULL;
+        symbol.type_info.c_function.c_name = strdup(name_node->data.string_value);
+        symbol.type_info.c_function.return_type = SYM_INT;
+        symbol.type_info.c_function.param_count = params_node->data.list.count;
+        symbol.init_value = NULL;
+        add_symbol(table, symbol);
+    } else if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
+        ASTNode *op = stmt->data.list.children[0];
+
+        if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
+            ASTNode *name_node = stmt->data.list.children[1];
+            
+            if (name_node->type == AST_IDENTIFIER) {
+                Symbol symbol;
+                symbol.name = strdup(name_node->data.string_value);
+                
+                if (stmt->data.list.count == 3) {
+                    symbol.type = SYM_INT;
+                } else if (stmt->data.list.count >= 4) {
+                    ASTNode *type_node = stmt->data.list.children[2];
+                    
+                    if (type_node->type == AST_IDENTIFIER) {
+                        if (strcmp(type_node->data.string_value, "int") == 0) {
+                            symbol.type = SYM_INT;
+                        } else if (strcmp(type_node->data.string_value, "str") == 0) {
+                            symbol.type = SYM_STR;
+                        } else if (strcmp(type_node->data.string_value, "char") == 0) {
+                            symbol.type = SYM_CHAR;
+                        } else if (strcmp(type_node->data.string_value, "bool") == 0) {
+                            symbol.type = SYM_BOOL;
+                        } else if (strcmp(type_node->data.string_value, "struct") == 0) {
+                            free(symbol.name);
+                            return;
+                        } else {
+                            symbol.type = SYM_STRUCT;
+                            symbol.type_info.struct_instance.struct_type_name = strdup(type_node->data.string_value);
+                        }
+                    } else if (type_node->type == AST_LIST && type_node->data.list.count >= 2) {
+                        ASTNode *type_op = type_node->data.list.children[0];
+                        if (type_op->type == AST_IDENTIFIER && 
+                            (strcmp(type_op->data.string_value, "array_type") == 0 ||
+                             strcmp(type_op->data.string_value, "[]") == 0)) {
+                            symbol.type = SYM_ARRAY;
+                        } else if (type_op->type == AST_IDENTIFIER && 
+                                   strcmp(type_op->data.string_value, "*") == 0) {
+                            symbol.type = SYM_POINTER;
+                        } else {
+                            symbol.type = SYM_INT;
+                        }
+                    } else {
+                        symbol.type = SYM_INT;
+                    }
+                } else {
+                    symbol.type = SYM_INT;
+                }
+                
+                if (stmt->data.list.count == 3) {
+                    symbol.init_value = stmt->data.list.children[2];
+                } else if (stmt->data.list.count >= 4) {
+                    symbol.init_value = stmt->data.list.children[3];
+                } else {
+                    symbol.init_value = NULL;
+                }
+                
+                if (symbol.init_value && symbol.init_value->type == AST_FN) {
+                    symbol.type = SYM_FUNCTION;
+                    symbol.type_info.function.param_count = symbol.init_value->data.fn.param_count;
+                    symbol.type_info.function.param_types = NULL;
+                    symbol.type_info.function.return_type = SYM_INT;
+                }
+                
+                add_symbol(table, symbol);
+            }
+        } else if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "begin") == 0) {
+            // Create a child scope for this begin block
+            SymbolTable *child = create_child_scope(table);
+            stmt->scope = child;
+            for (size_t i = 1; i < stmt->data.list.count; i++) {
+                collect_symbols_from_stmt(stmt->data.list.children[i], child);
+            }
+        } else if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "if") == 0) {
+            if (stmt->data.list.count >= 3) {
+                ASTNode *then_branch = stmt->data.list.children[2];
+                if (then_branch->type == AST_LIST && then_branch->data.list.count >= 1) {
+                    ASTNode *then_op = then_branch->data.list.children[0];
+                    if (then_op->type == AST_IDENTIFIER && strcmp(then_op->data.string_value, "begin") == 0) {
+                        SymbolTable *child = create_child_scope(table);
+                        then_branch->scope = child;
+                        collect_symbols_from_block(then_branch, child);
+                    } else {
+                        collect_symbols_from_stmt(then_branch, table);
+                    }
+                }
+            }
+            if (stmt->data.list.count >= 4) {
+                ASTNode *else_branch = stmt->data.list.children[3];
+                if (else_branch->type == AST_LIST && else_branch->data.list.count >= 1) {
+                    ASTNode *else_op = else_branch->data.list.children[0];
+                    if (else_op->type == AST_IDENTIFIER && strcmp(else_op->data.string_value, "begin") == 0) {
+                        SymbolTable *child = create_child_scope(table);
+                        else_branch->scope = child;
+                        collect_symbols_from_block(else_branch, child);
+                    } else {
+                        collect_symbols_from_stmt(else_branch, table);
+                    }
+                }
+            }
+        } else if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "while") == 0) {
+            if (stmt->data.list.count >= 3) {
+                ASTNode *body = stmt->data.list.children[2];
+                if (body->type == AST_LIST && body->data.list.count >= 1) {
+                    ASTNode *body_op = body->data.list.children[0];
+                    if (body_op->type == AST_IDENTIFIER && strcmp(body_op->data.string_value, "begin") == 0) {
+                        SymbolTable *child = create_child_scope(table);
+                        body->scope = child;
+                        collect_symbols_from_block(body, child);
+                    } else {
+                        collect_symbols_from_stmt(body, table);
+                    }
+                }
+            }
+        }
+    }
+}
+
 SymbolTable *build_symbol_table(ASTNode *ast) {
     SymbolTable *table = malloc(sizeof(SymbolTable));
     if (!table) {
@@ -81,111 +247,25 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
     table->symbols = NULL;
     table->count = 0;
     table->capacity = 0;
-    table->parent = NULL;  // Global symbol table has no parent
+    table->parent = NULL;
+    table->first_child = NULL;
+    table->next_sibling = NULL;
+    table->next_offset = 0;
     
-    // Traverse AST and collect symbols
+    // Traverse AST and collect symbols from all nested scopes
     if (ast->type == AST_LIST) {
         for (size_t i = 0; i < ast->data.list.count; i++) {
-            ASTNode *stmt = ast->data.list.children[i];
-            
-            if (stmt->type == AST_EXTERN_DECL) {
-                ASTNode *name_node = stmt->data.list.children[0];
-                ASTNode *params_node = stmt->data.list.children[1];
-
-                Symbol symbol;
-                symbol.name = strdup(name_node->data.string_value);
-                symbol.type = SYM_C_FUNCTION;
-                symbol.is_external = true;
-                symbol.c_library = NULL;
-                symbol.type_info.c_function.c_name = strdup(name_node->data.string_value);
-                symbol.type_info.c_function.return_type = SYM_INT;
-                symbol.type_info.c_function.param_count = params_node->data.list.count;
-                symbol.init_value = NULL;
-                add_symbol(table, symbol);
-            } else if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
-                ASTNode *op = stmt->data.list.children[0];
-
-                if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
-                    // Variable declaration
-                    ASTNode *name_node = stmt->data.list.children[1];
-                    
-                    if (name_node->type == AST_IDENTIFIER) {
-                        Symbol symbol;
-                        symbol.name = strdup(name_node->data.string_value);
-                        
-                        // Determine if this is 3-element (let name value) or 4-element (let name type value) format
-                        if (stmt->data.list.count == 3) {
-                            // 3-element format: (let name value) - infer type from value
-                            symbol.type = SYM_INT; // default type for 3-element format
-                        } else if (stmt->data.list.count >= 4) {
-                            // 4-element format: (let name type value) - explicit type
-                            ASTNode *type_node = stmt->data.list.children[2];
-                            
-                            // Parse type
-                            if (type_node->type == AST_IDENTIFIER) {
-                                if (strcmp(type_node->data.string_value, "int") == 0) {
-                                    symbol.type = SYM_INT;
-                                } else if (strcmp(type_node->data.string_value, "str") == 0) {
-                                    symbol.type = SYM_STR;
-                                } else if (strcmp(type_node->data.string_value, "char") == 0) {
-                                    symbol.type = SYM_CHAR;
-                                } else if (strcmp(type_node->data.string_value, "bool") == 0) {
-                                    symbol.type = SYM_BOOL;
-                                } else if (strcmp(type_node->data.string_value, "struct") == 0) {
-                                    // Skip struct type definitions, they don't create variables
-                                    free(symbol.name);
-                                    continue;
-                                } else {
-                                    // This might be a user-defined struct type name
-                                    symbol.type = SYM_STRUCT;
-                                    symbol.type_info.struct_instance.struct_type_name = strdup(type_node->data.string_value);
-                                }
-                            } else if (type_node->type == AST_LIST && type_node->data.list.count >= 2) {
-                                ASTNode *type_op = type_node->data.list.children[0];
-                                if (type_op->type == AST_IDENTIFIER && 
-                                    (strcmp(type_op->data.string_value, "array_type") == 0 ||
-                                     strcmp(type_op->data.string_value, "[]") == 0)) {
-                                    symbol.type = SYM_ARRAY;
-                                } else if (type_op->type == AST_IDENTIFIER && 
-                                           strcmp(type_op->data.string_value, "*") == 0) {
-                                    symbol.type = SYM_POINTER;
-                                } else {
-                                    symbol.type = SYM_INT; // default
-                                }
-                            } else {
-                                symbol.type = SYM_INT; // default
-                            }
-                        } else {
-                            symbol.type = SYM_INT; // default
-                        }
-                        
-                        // Check different let statement formats:
-                        // 3 elements: (let name (fn ...))  
-                        // 4 elements: (let name type value) or (let name type (fn ...))
-                        if (stmt->data.list.count == 3) {
-                            symbol.init_value = stmt->data.list.children[2];
-                        } else if (stmt->data.list.count >= 4) {
-                            symbol.init_value = stmt->data.list.children[3];
-                        } else {
-                            symbol.init_value = NULL;
-                        }
-                        
-                        // Check if this is a function definition: (let name (fn ...))
-                        if (symbol.init_value && symbol.init_value->type == AST_FN) {
-                            symbol.type = SYM_FUNCTION;
-                            symbol.type_info.function.param_count = symbol.init_value->data.fn.param_count;
-                            symbol.type_info.function.param_types = NULL;
-                            symbol.type_info.function.return_type = SYM_INT; // default
-                        }
-                        
-                        add_symbol(table, symbol);
-                    }
-}
-            }
+            collect_symbols_from_stmt(ast->data.list.children[i], table);
         }
     }
     
     return table;
+}
+
+static int symbol_stack_size(Symbol *sym) {
+    if (sym->type == SYM_ARRAY) return 32;
+    if (sym->type == SYM_STRUCT) return 16;
+    return 8;
 }
 
 void add_symbol(SymbolTable *table, Symbol symbol) {
@@ -196,6 +276,13 @@ void add_symbol(SymbolTable *table, Symbol symbol) {
             fprintf(stderr, "Error: Failed to allocate memory for symbols\n");
             exit(1);
         }
+    }
+    // Assign stack offset for non-function symbols
+    if (symbol.type != SYM_FUNCTION && symbol.type != SYM_C_FUNCTION) {
+        symbol.stack_offset = table->next_offset;
+        table->next_offset += symbol_stack_size(&symbol);
+    } else {
+        symbol.stack_offset = -1;
     }
     table->symbols[table->count++] = symbol;
 }
@@ -209,30 +296,52 @@ Symbol *find_symbol(SymbolTable *table, const char *name) {
     return NULL;
 }
 
-int get_symbol_offset(SymbolTable *table, const char *name) {
-    int offset = 0;
+static int total_scope_size(SymbolTable *table) {
+    int size = 0;
     for (size_t i = 0; i < table->count; i++) {
-        // Functions don't have stack slots
         if (table->symbols[i].type == SYM_FUNCTION ||
             table->symbols[i].type == SYM_C_FUNCTION) {
             continue;
         }
+        size += symbol_stack_size(&table->symbols[i]);
+    }
+    return size;
+}
+
+int total_tree_size(SymbolTable *table) {
+    if (!table) return 0;
+    int size = total_scope_size(table);
+    SymbolTable *child = table->first_child;
+    while (child) {
+        size += total_tree_size(child);
+        child = child->next_sibling;
+    }
+    return size;
+}
+
+int get_symbol_offset(SymbolTable *table, const char *name) {
+    // Search own symbols
+    for (size_t i = 0; i < table->count; i++) {
         if (strcmp(table->symbols[i].name, name) == 0) {
-            return offset;
-        }
-        if (table->symbols[i].type == SYM_ARRAY) {
-            offset += 32;
-        } else if (table->symbols[i].type == SYM_STRUCT) {
-            offset += 16;
-        } else {
-            offset += 8;
+            return table->symbols[i].stack_offset;
         }
     }
-    return -1; // Not found
+    // Not found in this scope — search parent
+    if (table->parent) {
+        return get_symbol_offset(table->parent, name);
+    }
+    return -1;
 }
 
 void free_symbol_table(SymbolTable *table) {
     if (table) {
+        // Free children
+        SymbolTable *child = table->first_child;
+        while (child) {
+            SymbolTable *next = child->next_sibling;
+            free_symbol_table(child);
+            child = next;
+        }
         for (size_t i = 0; i < table->count; i++) {
             free(table->symbols[i].name);
         }
@@ -340,14 +449,20 @@ void emit_mov_immediate(CodeGen *codegen, const char *reg, int value) {
     emit_code(codegen, "    mov   %s, #%d\n", reg, value);
 }
 
-void emit_load_variable(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols) {
-    emit_load_variable_with_adjustment(codegen, reg, var_name, symbols, 0);
+void emit_push_call_frame(CodeGen *codegen) {
+    emit_code(codegen, "    stp   x29, x30, [sp, #-16]!\n");
+    codegen->sp_displacement += 16;
 }
 
-void emit_load_variable_with_adjustment(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols, int stack_adjustment) {
+void emit_pop_call_frame(CodeGen *codegen) {
+    codegen->sp_displacement -= 16;
+    emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
+}
+
+void emit_load_variable(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols) {
     int offset = get_symbol_offset(symbols, var_name);
     if (offset >= 0) {
-        emit_code(codegen, "    ldr   %s, [sp, #%d]\n", reg, offset + stack_adjustment);
+        emit_code(codegen, "    ldr   %s, [sp, #%d]\n", reg, offset + codegen->sp_displacement);
     } else {
         fprintf(stderr, "error: undeclared variable '%s'\n", var_name);
         exit(1);
@@ -357,7 +472,7 @@ void emit_load_variable_with_adjustment(CodeGen *codegen, const char *reg, const
 void emit_store_variable(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols) {
     int offset = get_symbol_offset(symbols, var_name);
     if (offset >= 0) {
-        emit_code(codegen, "    str   %s, [sp, #%d]\n", reg, offset);
+        emit_code(codegen, "    str   %s, [sp, #%d]\n", reg, offset + codegen->sp_displacement);
     } else {
         fprintf(stderr, "error: undeclared variable '%s'\n", var_name);
         exit(1);
@@ -396,111 +511,6 @@ void emit_arithmetic(CodeGen *codegen, const char *op, const char *dest, const c
     } else if (strcmp(op, ">=") == 0) {
         emit_code(codegen, "    cmp   %s, %s\n", src1, src2);
         emit_code(codegen, "    cset  %s, ge\n", dest);
-    }
-}
-
-void generate_expression_with_adjustment(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols, int stack_adjustment) {
-    if (!expr) return;
-    
-    switch (expr->type) {
-        case AST_INT:
-            emit_mov_immediate(codegen, "x0", expr->data.int_value);
-            break;
-            
-        case AST_CHAR:
-            emit_mov_immediate(codegen, "x0", (int)expr->data.char_value);
-            break;
-            
-        case AST_IDENTIFIER:
-            emit_load_variable_with_adjustment(codegen, "x0", expr->data.string_value, symbols, stack_adjustment);
-            break;
-            
-        case AST_LIST:
-            if (expr->data.list.count > 0) {
-                ASTNode *op = expr->data.list.children[0];
-                
-                if (op->type == AST_IDENTIFIER) {
-                    // Handle arithmetic and comparison operators
-                    if (strcmp(op->data.string_value, "+") == 0 ||
-                        strcmp(op->data.string_value, "-") == 0 ||
-                        strcmp(op->data.string_value, "*") == 0 ||
-                        strcmp(op->data.string_value, "/") == 0 ||
-                        strcmp(op->data.string_value, "%") == 0 ||
-                        strcmp(op->data.string_value, "**") == 0 ||
-                        strcmp(op->data.string_value, "=") == 0 ||
-                        strcmp(op->data.string_value, "<") == 0 ||
-                        strcmp(op->data.string_value, ">") == 0 ||
-                        strcmp(op->data.string_value, "<=") == 0 ||
-                        strcmp(op->data.string_value, ">=") == 0) {
-                        
-                        if (expr->data.list.count >= 3) {
-                            // Generate code for operands
-                            ASTNode *left = expr->data.list.children[1];
-                            ASTNode *right = expr->data.list.children[2];
-                            
-                            // Load left operand into x2
-                            if (left->type == AST_INT) {
-                                emit_mov_immediate(codegen, "x2", left->data.int_value);
-                            } else if (left->type == AST_IDENTIFIER) {
-                                emit_load_variable_with_adjustment(codegen, "x2", left->data.string_value, symbols, stack_adjustment);
-                            } else if (left->type == AST_LIST) {
-                                generate_expression_with_adjustment(codegen, left, symbols, stack_adjustment);
-                                emit_code(codegen, "    mov   x2, x0\n");
-                            }
-                            
-                            // Load right operand into x3
-                            if (right->type == AST_INT) {
-                                emit_mov_immediate(codegen, "x3", right->data.int_value);
-                            } else if (right->type == AST_IDENTIFIER) {
-                                emit_load_variable_with_adjustment(codegen, "x3", right->data.string_value, symbols, stack_adjustment);
-                            } else if (right->type == AST_LIST) {
-                                generate_expression_with_adjustment(codegen, right, symbols, stack_adjustment);
-                                emit_code(codegen, "    mov   x3, x0\n");
-                            }
-                            
-                            // Perform operation
-                            emit_arithmetic(codegen, op->data.string_value, "x0", "x2", "x3");
-                        }
-                        // Handle dereference: (* ptr) — load value from address in ptr
-                        else if (strcmp(op->data.string_value, "*") == 0 && expr->data.list.count == 2) {
-                            ASTNode *operand = expr->data.list.children[1];
-                            generate_expression_with_adjustment(codegen, operand, symbols, stack_adjustment);
-                            emit_code(codegen, "    ldr   x0, [x0]\n");
-                        }
-                    }
-                    // Handle address-of: (& x)
-                    else if (strcmp(op->data.string_value, "&") == 0 && expr->data.list.count == 2) {
-                        ASTNode *operand = expr->data.list.children[1];
-                        if (operand->type == AST_IDENTIFIER) {
-                            int offset = get_symbol_offset(symbols, operand->data.string_value);
-                            if (offset >= 0) {
-                                emit_code(codegen, "    mov   x0, sp\n");
-                                emit_code(codegen, "    add   x0, x0, #%d\n", offset + stack_adjustment);
-                            } else {
-                                emit_mov_immediate(codegen, "x0", 0);
-                            }
-                        } else {
-                            emit_mov_immediate(codegen, "x0", 0);
-                        }
-                    }
-                    // Handle logical not: (not expr)
-                    else if (strcmp(op->data.string_value, "not") == 0 && expr->data.list.count == 2) {
-                        ASTNode *operand = expr->data.list.children[1];
-                        generate_expression_with_adjustment(codegen, operand, symbols, stack_adjustment);
-                        emit_code(codegen, "    cmp   x0, #0\n");
-                        emit_code(codegen, "    cset  x0, eq\n");
-                    }
-                    // For other operations, fall back to normal expression generation
-                    else {
-                        generate_expression(codegen, expr, symbols);
-                    }
-                }
-            }
-            break;
-            
-        default:
-            emit_mov_immediate(codegen, "x0", 0);
-            break;
     }
 }
 
@@ -619,7 +629,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             int offset = get_symbol_offset(symbols, operand->data.string_value);
                             if (offset >= 0) {
                                 emit_code(codegen, "    mov   x0, sp\n");
-                                emit_code(codegen, "    add   x0, x0, #%d\n", offset);
+                                emit_code(codegen, "    add   x0, x0, #%d\n", offset + codegen->sp_displacement);
                             } else {
                                 emit_mov_immediate(codegen, "x0", 0);
                             }
@@ -757,7 +767,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             emit_code(codegen, "    // Function call: %s\n", op->data.string_value);
                             
                             // Save link register
-                            emit_code(codegen, "    stp   x29, x30, [sp, #-16]!\n");
+                            emit_push_call_frame(codegen);
                             
                             // Pass arguments - for structs, we need to copy all fields
                             int arg_count = expr->data.list.count - 1; // Subtract 1 for function name
@@ -776,12 +786,12 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                         // This is a struct - copy all fields (assuming 2 fields for now)
                                         int struct_offset = get_symbol_offset(symbols, arg->data.string_value);
                                         // Copy field 0 (x)
-                                        emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 16);
+                                        emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + codegen->sp_displacement);
                                         emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                         reg_index++;
                                         // Copy field 1 (y) if we have register space
                                         if (reg_index < 8) {
-                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 8 + 16);
+                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 8 + codegen->sp_displacement);
                                             emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                             reg_index++;
                                         }
@@ -790,16 +800,15 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                         int array_offset = get_symbol_offset(symbols, arg->data.string_value);
                                         // Copy elements 0, 1, 2, 3
                                         for (int elem = 0; elem < 4 && reg_index < 8; elem++) {
-                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", array_offset + elem * 8 + 16);
+                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", array_offset + elem * 8 + codegen->sp_displacement);
                                             emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                             reg_index++;
                                         }
                                     } else {
-                                        // Regular variable - need to account for stack pointer movement due to stp instruction
+                                        // Regular variable
                                         int arg_offset = get_symbol_offset(symbols, arg->data.string_value);
                                         if (arg_offset >= 0) {
-                                            // Add 16 to offset to account for saved registers
-                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", arg_offset + 16);
+                                            emit_code(codegen, "    ldr   x9, [sp, #%d]\n", arg_offset + codegen->sp_displacement);
                                         } else {
                                             emit_mov_immediate(codegen, "x9", 0);
                                         }
@@ -827,9 +836,8 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                     emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                     reg_index++;
                                 } else if (arg->type == AST_LIST) {
-                                    // For complex expressions inside function calls, we need to account for stack adjustment
-                                    // The stack pointer has moved due to the stp instruction above
-                                    generate_expression_with_adjustment(codegen, arg, symbols, 16);
+                                    // For complex expressions inside function calls
+                                    generate_expression(codegen, arg, symbols);
                                     emit_code(codegen, "    mov   x%d, x0\n", reg_index);
                                     reg_index++;
                                 }
@@ -846,7 +854,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             }
                             
                             // Restore link register
-                            emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
+                            emit_pop_call_frame(codegen);
                         } else {
                             fprintf(stderr, "error: undeclared function '%s'\n", op->data.string_value);
                             exit(1);
@@ -1127,8 +1135,17 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
         }
     } else if (strcmp(op->data.string_value, "begin") == 0) {
         // Begin block: (begin stmt1 stmt2 ...)
+        // Use pre-built scope if available, otherwise create one on the fly
+        SymbolTable *child = stmt->scope;
+        if (!child) {
+            child = create_child_scope(symbols);
+            stmt->scope = child;
+            for (size_t i = 1; i < stmt->data.list.count; i++) {
+                collect_symbols_from_stmt(stmt->data.list.children[i], child);
+            }
+        }
         for (size_t i = 1; i < stmt->data.list.count; i++) {
-            generate_statement(codegen, stmt->data.list.children[i], symbols);
+            generate_statement(codegen, stmt->data.list.children[i], child);
         }
     } else if (strcmp(op->data.string_value, "ret") == 0) {
         // Return statement: (ret expr)
@@ -1152,7 +1169,7 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                     emit_code(codegen, "    // Function call: %s\n", function_name->data.string_value);
                     
                     // Save link register
-                    emit_code(codegen, "    stp   x29, x30, [sp, #-16]!\n");
+                    emit_push_call_frame(codegen);
                     
                     // Pass arguments to the function
                     int arg_count = stmt->data.list.count - 1; // Subtract 1 for function name
@@ -1245,12 +1262,12 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                                 // This is a struct - copy all fields (assuming 2 fields for now)
                                 int struct_offset = get_symbol_offset(symbols, arg->data.string_value);
                                 // Copy field 0 (x)
-                                emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 16);
+                                emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + codegen->sp_displacement);
                                 emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                 reg_index++;
                                 // Copy field 1 (y) if we have register space
                                 if (reg_index < 8) {
-                                    emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 8 + 16);
+                                    emit_code(codegen, "    ldr   x9, [sp, #%d]\n", struct_offset + 8 + codegen->sp_displacement);
                                     emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                     reg_index++;
                                 }
@@ -1259,16 +1276,15 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                                 int array_offset = get_symbol_offset(symbols, arg->data.string_value);
                                 // Copy elements 0, 1, 2, 3
                                 for (int elem = 0; elem < 4 && reg_index < 8; elem++) {
-                                    emit_code(codegen, "    ldr   x9, [sp, #%d]\n", array_offset + elem * 8 + 16);
+                                    emit_code(codegen, "    ldr   x9, [sp, #%d]\n", array_offset + elem * 8 + codegen->sp_displacement);
                                     emit_code(codegen, "    mov   x%d, x9\n", reg_index);
                                     reg_index++;
                                 }
                             } else {
-                                // Regular variable - need to account for stack pointer movement due to stp instruction
+                                // Regular variable
                                 int arg_offset = get_symbol_offset(symbols, arg->data.string_value);
                                 if (arg_offset >= 0) {
-                                    // Add 16 to offset to account for saved registers
-                                    emit_code(codegen, "    ldr   x9, [sp, #%d]\n", arg_offset + 16);
+                                    emit_code(codegen, "    ldr   x9, [sp, #%d]\n", arg_offset + codegen->sp_displacement);
                                 } else {
                                     emit_mov_immediate(codegen, "x9", 0);
                                 }
@@ -1276,9 +1292,8 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                                 reg_index++;
                             }
                         } else if (arg->type == AST_LIST) {
-                            // For complex expressions inside function calls, we need to account for stack adjustment
-                            // The stack pointer has moved due to the stp instruction above
-                            generate_expression_with_adjustment(codegen, arg, symbols, 16);
+                            // For complex expressions inside function calls
+                            generate_expression(codegen, arg, symbols);
                             emit_code(codegen, "    mov   x%d, x0\n", reg_index);
                             reg_index++;
                         }
@@ -1295,7 +1310,7 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                     }
                     
                     // Restore link register
-                    emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
+                    emit_pop_call_frame(codegen);
                     return;
                 }
             }
@@ -1319,7 +1334,10 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
     func_symbols->symbols = NULL;
     func_symbols->count = 0;
     func_symbols->capacity = 0;
-    func_symbols->parent = symbols;  // Link to global symbol table
+    func_symbols->parent = symbols;
+    func_symbols->first_child = NULL;
+    func_symbols->next_sibling = NULL;
+    func_symbols->next_offset = 0;
     
     // Extract parameters and create local symbols
     int param_count = 0;
@@ -1394,20 +1412,13 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                 }
             }
             
-            // Calculate and allocate stack space based on parameter types
-            for (size_t i = 0; i < func_symbols->count; i++) {
-                if (func_symbols->symbols[i].type == SYM_FUNCTION ||
-                    func_symbols->symbols[i].type == SYM_C_FUNCTION) {
-                    continue;
-                }
-                if (func_symbols->symbols[i].type == SYM_ARRAY) {
-                    stack_space += 32;
-                } else if (func_symbols->symbols[i].type == SYM_STRUCT) {
-                    stack_space += 16;
-                } else {
-                    stack_space += 8;
-                }
+            // Pre-build child scopes for fn body (for accurate stack sizing)
+            if (fn_node->data.fn.body) {
+                collect_symbols_from_stmt(fn_node->data.fn.body, func_symbols);
             }
+            
+            // Calculate and allocate stack space (includes nested scopes)
+            stack_space = total_tree_size(func_symbols);
             if (stack_space % 16 != 0) {
                 stack_space += 16 - (stack_space % 16);
             }
@@ -1476,18 +1487,9 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
         emit_mov_immediate(codegen, "x0", 0);
     }
     
-    // Cleanup stack space for parameters
-    if (func_symbols->count > 0) {
-        int cleanup_space = 0;
-        for (size_t i = 0; i < func_symbols->count; i++) {
-            if (func_symbols->symbols[i].type == SYM_ARRAY) {
-                cleanup_space += 32; // 4 elements × 8 bytes for arrays (assuming int[4])
-            } else if (func_symbols->symbols[i].type == SYM_STRUCT) {
-                cleanup_space += 16; // 2 fields × 8 bytes for structs  
-            } else {
-                cleanup_space += 8; // 8 bytes for regular variables
-            }
-        }
+    // Cleanup stack space (including nested scopes)
+    {
+        int cleanup_space = total_tree_size(func_symbols);
         if (cleanup_space % 16 != 0) {
             cleanup_space += 16 - (cleanup_space % 16);
         }
@@ -1527,20 +1529,7 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
     emit_code(codegen, "    mov   x29, sp\n");
     
     // Calculate stack space needed (functions don't get stack slots)
-    int stack_space = 0;
-    for (size_t i = 0; i < symbols->count; i++) {
-        if (symbols->symbols[i].type == SYM_FUNCTION ||
-            symbols->symbols[i].type == SYM_C_FUNCTION) {
-            continue;
-        }
-        if (symbols->symbols[i].type == SYM_ARRAY) {
-            stack_space += 32;
-        } else if (symbols->symbols[i].type == SYM_STRUCT) {
-            stack_space += 16;
-        } else {
-            stack_space += 8;
-        }
-    }
+    int stack_space = total_tree_size(symbols);
     if (stack_space % 16 != 0) {
         stack_space += 16 - (stack_space % 16);
     }
@@ -1583,9 +1572,11 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
                       strcmp(stmt->data.list.children[0]->data.string_value, "set") != 0 &&
                       strcmp(stmt->data.list.children[0]->data.string_value, "print") != 0 &&
                       strcmp(stmt->data.list.children[0]->data.string_value, "if") != 0 &&
-                      strcmp(stmt->data.list.children[0]->data.string_value, "while") != 0 &&
-                      // EXCLUDE function calls from being final expressions
-                      !is_function_call(stmt, symbols)))) {
+                       strcmp(stmt->data.list.children[0]->data.string_value, "while") != 0 &&
+                       strcmp(stmt->data.list.children[0]->data.string_value, "begin") != 0 &&
+                       strcmp(stmt->data.list.children[0]->data.string_value, "ret") != 0 &&
+                       // EXCLUDE function calls from being final expressions
+                       !is_function_call(stmt, symbols)))) {
                     final_expr = stmt;
                 }
             }
