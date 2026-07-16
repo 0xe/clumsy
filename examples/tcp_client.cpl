@@ -1,36 +1,41 @@
 // Simple TCP client using SDL_net
-(extern SDL_Init [uint32_t] int)
+(extern SDL_Init [int] int)
 (extern SDLNet_Init [] int)
 (extern SDLNet_Quit [] void)
-(extern SDLNet_ResolveHost [*void *char uint16_t] int)
-(extern SDLNet_TCP_Open [*void] *void)
-(extern SDLNet_TCP_Close [*void] void)
-(extern SDL_Delay [uint32_t] void)
+(extern SDLNet_ResolveHost [(* void) (* char) int] int)
+(extern SDLNet_TCP_Open [(* void)] (* void))
+(extern SDLNet_TCP_Close [(* void)] void)
+(extern SDL_Delay [int] void)
 (extern SDL_Quit [] void)
 
 // Constants
 (let SDL_INIT_VIDEO int 0)
-(let PORT uint16_t 8080)
+(let PORT int 8080)
+
+// State (declared at top level so build_symbol_table finds them)
+(let net_result int 0)
+(let ip (* void) 0)
+(let resolve_result int 0)
+(let client_socket (* void) 0)
 
 // Initialize systems
-(let sdl_result int (SDL_Init SDL_INIT_VIDEO))
-(let net_result int (SDLNet_Init))
+(SDL_Init SDL_INIT_VIDEO)
+(set net_result (SDLNet_Init))
 
 (if (= net_result 0)
   (begin
     (print "TCP Client starting...")
-    
+
     // Connect to localhost on port 8080
-    (let ip void null)
-    (let resolve_result int (SDLNet_ResolveHost ip "127.0.0.1" PORT))
-    
+    (set resolve_result (SDLNet_ResolveHost ip "127.0.0.1" PORT))
+
     (if (= resolve_result 0)
       (begin
-        (let client_socket *void (SDLNet_TCP_Open ip))
-        (if (!= client_socket null)
+        (set client_socket (SDLNet_TCP_Open ip))
+        (if (not (= client_socket 0))
           (begin
             (print "Connected to server!")
-            (SDL_Delay 1000)  // Stay connected for 1 second
+            (SDL_Delay 1000)
             (SDLNet_TCP_Close client_socket)
             (print "Disconnected from server")
           )
@@ -39,7 +44,7 @@
       )
       (print "Failed to resolve localhost")
     )
-    
+
     (SDLNet_Quit)
   )
   (print "SDLNet initialization failed")

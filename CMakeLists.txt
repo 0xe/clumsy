@@ -64,12 +64,20 @@ file(GLOB EXAMPLE_FILES "${CMAKE_SOURCE_DIR}/examples/*.cpl")
 foreach(example_file ${EXAMPLE_FILES})
     get_filename_component(example_name ${example_file} NAME_WE)
 
+    set(EXTRA_LINK_LIBS "")
+    if(${example_name} MATCHES "^(tcp_server|tcp_client)$")
+        set(EXTRA_LINK_LIBS "-L/opt/homebrew/lib -lSDL2 -lSDL2_net")
+    elseif(${example_name} MATCHES "^(sdl_demo|sdl_loop|sdl_bindings|real_tetris)$")
+        set(EXTRA_LINK_LIBS "-L/opt/homebrew/lib -lSDL2")
+    endif()
+
     add_custom_target(build-${example_name}
         COMMAND ${CMAKE_COMMAND}
             -DCOMPILER=$<TARGET_FILE:clumsyc>
             -DEXAMPLE_FILE=${example_file}
             -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
             -DPRINT_HELPERS=$<TARGET_FILE:print_helpers>
+            -DLINK_LIBS=${EXTRA_LINK_LIBS}
             -P ${CMAKE_SOURCE_DIR}/example_runner.cmake
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         DEPENDS clumsyc print_helpers

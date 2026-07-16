@@ -1,107 +1,50 @@
 // Simple SDL Test - Demonstrate all C-interop features
 
-// Test 1: Basic SDL setup and rendering
-(let window *void null)
-(let renderer *void null)
+// Constants
+(let SDL_INIT_VIDEO int 0x00000020)
+(let SDL_WINDOW_SHOWN int 4)
+(let SDL_WINDOWPOS_UNDEFINED int 0x1FFF0000)
 
-(print "=== SDL C-Interop Demo ===")
-(print "")
+// Externs
+(extern SDL_Init [int] int)
+(extern SDL_CreateWindow [(* char) int int int int int] (* void))
+(extern SDL_CreateRenderer [(* void) int int] (* void))
+(extern SDL_SetRenderDrawColor [(* void) int int int int] int)
+(extern SDL_RenderClear [(* void)] int)
+(extern SDL_RenderFillRect [(* void) int int int int] int)
+(extern SDL_RenderPresent [(* void)] void)
+(extern SDL_DestroyRenderer [(* void)] void)
+(extern SDL_DestroyWindow [(* void)] void)
+(extern SDL_Delay [int] void)
+(extern SDL_Quit [] void)
 
-;; Initialize SDL
-(print "Initializing SDL...")
-(if (SDL_Init SDL_INIT_VIDEO 0)
+// State
+(let window (* void) 0)
+(let renderer (* void) 0)
+
+(print "=== SDL C-Interop Demo ===\n")
+
+// Initialize SDL
+(SDL_Init SDL_INIT_VIDEO)
+(set window (SDL_CreateWindow "C-Interop Demo" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED 640 480 SDL_WINDOW_SHOWN 0))
+(set renderer (SDL_CreateRenderer window -1 0))
+
+(if (not (= renderer 0))
   (begin
-    (print "SDL initialized successfully!")
-    
-    ;; Create window and renderer
-    (set window (SDL_CreateWindow "C-Interop Demo" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED 640 480 SDL_WINDOW_SHOWN))
-    (set renderer (SDL_CreateRenderer window -1 0))
-    
-    (if (!= renderer null)
-      (begin
-        (print "Window and renderer created!")
-        
-        ;; Clear screen with white
-        (SDL_SetRenderDrawColor renderer 255 255 255 255)
-        (SDL_RenderClear renderer)
-        
-        ;; Draw a blue rectangle
-        (let color SDL_Color #((0 100 200 255)))
-        (SDL_SetRenderDrawColor renderer color.r color.g color.b color.a)
-        (SDL_RenderFillRect renderer #((100 150) 200 100)))
-        
-        ;; Show for 3 seconds
-        (SDL_RenderPresent renderer)
-        (SDL_Delay 3000)
-        
-        ;; Cleanup
-        (SDL_DestroyRenderer renderer)
-      )
-      (print "Failed to create renderer")
-    )
-    
-    ;; Main loop
-    (let running bool true)
-    (let event *SDL_Event (malloc 512))
-    
-    (while running)
-      (begin
-        ;; Handle events
-        (while (SDL_PollEvent event)
-          (begin
-            (if (= event.type 256) ;; SDL_QUIT
-              (set running false)
-            (if (= event.type 1024) ;; SDL_KEYDOWN
-              (print "Key pressed: ")
-                (if (= event.key.keysym.sym 1073741904) ;; Left arrow
-                  (print "Left")
-                (else if (= event.key.keysym.sym 1073741905) ;; Right arrow
-                  (print "Right")
-                (else if (= event.key.keysym.sym 1073741906) ;; Up arrow
-                  (print "Up")
-                (else if (= event.key.keysym.sym 1073741907) ;; Down arrow
-                  (print "Down")
-                )
-              )
-          )
-      )
-      
-      ;; Render and show
-      (SDL_SetRenderDrawColor renderer 255 255 255 255)
-      (SDL_RenderClear renderer)
-      
-      ;; Draw current time indicator
-      (let seconds (* (SDL_GetTicks) 1000))
-      (let time_color SDL_Color #((0 255 0) 255 255))
-      (SDL_SetRenderDrawColor renderer time_color.r time_color.g time_color.b time_color.a)
-      
-      ;; Draw time bar
-      (let bar_width (* seconds 10))
-      (SDL_RenderFillRect renderer #((10 400) bar_width 20))
-      
-      ;; Print time
-      (print "Time: ")
-      (printf "%d.%03ds" (/ seconds 1000) (* seconds 1000))
-      
-      ;; Present
-      (SDL_RenderPresent renderer)
-      
-      ;; Simple delay
-      (SDL_Delay 16)
-    )
-  )
-  
-  ;; Cleanup
-  (free event)
-  (if (!= renderer null)
+    (print "Window and renderer created!\n")
+    (SDL_SetRenderDrawColor renderer 255 255 255 255)
+    (SDL_RenderClear renderer)
+    (SDL_SetRenderDrawColor renderer 0 100 200 255)
+    (SDL_RenderFillRect renderer 100 150 200 100)
+    (SDL_RenderPresent renderer)
+    (SDL_Delay 3000)
     (SDL_DestroyRenderer renderer)
   )
-  (if (!= window null)
-    (SDL_DestroyWindow window)
-  )
-  
-  (SDL_Quit)
-  (print "Demo completed successfully!")
-  )
+  (print "Failed to create renderer\n")
+)
 
-(main)
+(if (not (= window 0))
+  (SDL_DestroyWindow window)
+)
+(SDL_Quit)
+(print "Demo completed successfully!\n")

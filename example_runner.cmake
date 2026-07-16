@@ -25,7 +25,8 @@ endif()
 # Link
 set(LINK_CMD clang -o ${TMP_DIR}/${EXAMPLE_NAME}.x ${TMP_DIR}/${EXAMPLE_NAME}.s ${PRINT_HELPERS})
 if(DEFINED LINK_LIBS AND NOT LINK_LIBS STREQUAL "")
-    list(APPEND LINK_CMD ${LINK_LIBS})
+    separate_arguments(LIBS_LIST UNIX_COMMAND "${LINK_LIBS}")
+    list(APPEND LINK_CMD ${LIBS_LIST})
 endif()
 
 execute_process(

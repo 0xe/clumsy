@@ -1,13 +1,30 @@
 // Working Tetris with C-interop
 
-(extern printf [*char int] int)
+(extern printf [(* char) int] int)
+(extern malloc [int] (* void))
+(extern free [(* void)] void)
+(extern SDL_Init [int] int)
+(extern SDL_CreateWindow [(* char) int int int int int] (* void))
+(extern SDL_CreateRenderer [(* void) int int] (* void))
+(extern SDL_SetRenderDrawColor [(* void) int int int int] int)
+(extern SDL_RenderClear [(* void)] int)
+(extern SDL_RenderPresent [(* void)] void)
+(extern SDL_RenderFillRect [(* void) int int int int] int)
+(extern SDL_DestroyRenderer [(* void)] void)
+(extern SDL_DestroyWindow [(* void)] void)
+(extern SDL_PollEvent [(* void)] int)
+(extern SDL_Delay [int] void)
+(extern SDL_Quit [] void)
 
-;; Game Constants
+// Constants
 (let BOARD_WIDTH int 10)
 (let BOARD_HEIGHT int 20)
 (let BLOCK_SIZE int 20)
+(let SDL_INIT_VIDEO int 0x00000020)
+(let SDL_WINDOW_SHOWN int 4)
+(let SDL_WINDOWPOS_UNDEFINED int 0x1FFF0000)
 
-;; Piece types
+// Piece types
 (let EMPTY int 0)
 (let I_PIECE int 1)
 (let O_PIECE int 2)
@@ -17,174 +34,43 @@
 (let Z_PIECE int 6)
 (let J_PIECE int 7)
 
-;; Game state
-(let board *int null)
-(let current_piece int I_PIECE)
+// Game state
+(let board (* void) 0)
+(let current_piece int 0)
 (let current_x int 5)
 (let current_y int 0)
-(let running bool true)
+(let window (* void) 0)
+(let renderer (* void) 0)
+(let event (* void) 0)
 
-;; Initialize board
-(let init_board
-    (fn [] void
+// Initialize SDL and create window
+(SDL_Init SDL_INIT_VIDEO)
+(set window (SDL_CreateWindow "Clumsy Tetris" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED (* BOARD_WIDTH BLOCK_SIZE) (* BOARD_HEIGHT BLOCK_SIZE) SDL_WINDOW_SHOWN 0))
+
+(if (not (= window 0))
   (begin
-    (set board (malloc (* BOARD_HEIGHT BOARD_WIDTH)))
-    (let i int 0)
-    (while (< i (* BOARD_HEIGHT BOARD_WIDTH)))
+    (set renderer (SDL_CreateRenderer window -1 0))
+    (if (not (= renderer 0))
       (begin
-        (let j int 0)
-        (while (< j BOARD_WIDTH))
-          (begin
-            (set (& board (* i BOARD_WIDTH + j)) EMPTY)
-            (set j (+ j 1))
-          )
-        (set i (+ i 1))
-      )
-    (printf "Board initialized\n")
-  ))
+        (printf "=== Tetris Game ===\n")
+        (printf "Controls: Q to quit\n")
 
-;; Draw current piece
-(let draw_piece
-    (fn [(* void) renderer int piece int x int y int] void
-  (begin
-    (if (= piece I_PIECE)
-      (begin
-        (SDL_SetRenderDrawColor renderer 255 0 0 255)
-        (SDL_RenderFillRect renderer #((x BLOCK_SIZE) y BLOCK_SIZE) BLOCK_SIZE BLOCK_SIZE))
-        (SDL_RenderFillRect renderer #((x BLOCK_SIZE) y BLOCK_SIZE) BLOCK_SIZE BLOCK_SIZE))
-      )
-    (else if (= piece O_PIECE)
-      (begin
-        (SDL_SetRenderDrawColor renderer 0 255 0 255)
-        (SDL_RenderFillRect renderer #((x BLOCK_SIZE) y BLOCK_SIZE) BLOCK_SIZE BLOCK_SIZE))
-        (SDL_RenderFillRect renderer #((x BLOCK_SIZE) y BLOCK_SIZE) BLOCK_SIZE BLOCK_SIZE))
-        (SDL_RenderFillRect renderer #((x BLOCK_SIZE) y BLOCK_SIZE) BLOCK_SIZE BLOCK_SIZE))
-        (SDL_RenderFillRect renderer #((x BLOCK_SIZE) y BLOCK_SIZE) BLOCK_SIZE BLOCK_SIZE))
-      )
-    )
-    )
-  ))
+        // Draw a simple board
+        (SDL_SetRenderDrawColor renderer 0 0 0 255)
+        (SDL_RenderClear renderer)
+        (SDL_SetRenderDrawColor renderer 255 255 255 255)
+        (SDL_RenderFillRect renderer 100 100 200 400)
+        (SDL_RenderPresent renderer)
+        (SDL_Delay 2000)
 
-;; Main game loop
-(let game_loop
-    (fn [(* void) renderer] void
-  (let event *SDL_Event (malloc 512))
-  
-  (printf "=== Tetris Game ===\n")
-  (printf "Controls:\n")
-  (printf "  Left/Right: Move piece\n")
-  (printf "  Down: Move piece down\n")
-  (printf "  Space: Change piece\n")
-  (printf "  Q: Quit\n")
-  (printf "\n")
-  
-  (while running)
-    (begin
-      ;; Handle events
-      (while (SDL_PollEvent event)
-        (begin
-          (if (= event.type 256)
-            (set running false)
-          (else if (= event.type 1024)
-            (begin
-              (if (= event.key.keysym.sym 1073741904)
-                (set current_x (- current_x 1))
-              )
-              (else if (= event.key.keysym.sym 1073741905)
-                (set current_x (+ current_x 1))
-              )
-              (else if (= event.key.keysym.sym 1073741907)
-                (set current_y (+ current_y 1))
-              )
-              (else if (= event.key.keysym.sym 1073741913)
-                (set current_piece (% (+ current_piece 1) 8))
-              )
-              (else if (= event.key.keysym.sym 113)
-                (set running false)
-              )
-            )
-        )
-      
-      ;; Render
-      (SDL_SetRenderDrawColor renderer 0 0 0 255)
-      (SDL_RenderClear renderer)
-      
-      ;; Draw board
-      (let y int 0)
-      (while (< y BOARD_HEIGHT))
-        (begin
-          (let x int 0)
-          (while (< x BOARD_WIDTH))
-            (begin
-              (let cell (* board (* y BOARD_WIDTH + x)))
-              (if (!= cell EMPTY)
-                (begin
-                  (SDL_SetRenderDrawColor renderer 0 100 200 255)
-                  (SDL_RenderFillRect renderer #((x BLOCK_SIZE) y BLOCK_SIZE) BLOCK_SIZE BLOCK_SIZE))
-                )
-              (set x (+ x 1))
-            )
-          (set y (+ y 1))
-        )
-      
-      ;; Draw current piece
-      (draw_piece renderer current_piece current_x current_y)
-      
-      ;; Present and delay
-      (SDL_RenderPresent renderer)
-      (SDL_Delay 100)
-    )
-  
-  (free event)
-  (SDL_DestroyRenderer renderer)
-  (SDL_DestroyWindow window)
-  (SDL_Quit)
-  (printf "Game over!\n")
-  ))
-
-;; Main function
-(let main
-    (fn [] int
-  (begin
-    (printf "Starting Tetris...\n")
-    
-    ;; Initialize SDL
-    (if (!= (SDL_Init SDL_INIT_VIDEO) 0)
-      (begin
-        (printf "SDL initialization failed!\n")
-        (return 1)
+        (SDL_DestroyRenderer renderer)
       )
+      (printf "Failed to create renderer\n")
     )
-    
-    (printf "SDL initialized!\n")
-    
-    ;; Create window
-    (let window (SDL_CreateWindow "Clumsy Tetris" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED BOARD_WIDTH BLOCK_SIZE BOARD_HEIGHT BLOCK_SIZE SDL_WINDOW_SHOWN))
-    (if (!= window null)
-      (begin
-        ;; Initialize board
-        (init_board)
-        
-        ;; Create renderer
-        (let renderer (SDL_CreateRenderer window -1 0))
-        (if (!= renderer null)
-          (begin
-            ;; Main game loop
-            (game_loop renderer)
-          )
-        (printf "Failed to create renderer\n")
-      )
-      (printf "Failed to create window\n")
-    )
-    
-    ;; Cleanup
-    (if (!= window null)
-      (SDL_DestroyWindow window)
-    )
-    (SDL_Quit)
-    
-    (return 0)
-  ))
+    (SDL_DestroyWindow window)
+  )
+  (printf "Failed to create window\n")
 )
 
-(main)
+(SDL_Quit)
+(printf "Game over!\n")

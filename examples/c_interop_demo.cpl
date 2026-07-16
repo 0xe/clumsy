@@ -1,11 +1,8 @@
-// Final C-Interop and SDL Demo
+// C-Interop and Pointer Demo
 
-;; Test all implemented features
-(print "=== C-Interop and Pointer Test ===\n")
-
-;; Test pointer operations
+// Test pointer operations
 (let x int 42)
-(let ptr *int &x)
+(let ptr (* int) (& x))
 (let y int (* ptr))
 (print "x = ")
 (print x)
@@ -13,34 +10,13 @@
 (print y)
 (print "\n")
 
-;; Test C function calls
-(extern printf [*char int] int)
-(extern malloc [int] *int)
-(extern free [*int] void)
+// Test C function calls
+(extern strlen [(* char)] int)
 
-(let msg str "Hello from C with pointers!\n")
-(let ptr2 *int (malloc 4))
-(if (!= ptr2 null)
-  (begin
-    (* ptr2 100)
-    (printf msg x ptr2)
-    (free ptr2)
-  )
-)
-
-;; Test array operations
-(let arr int[4] [10 20 30 40])
-(print "arr[2] = ")
-(print (& arr 2))
-(print "\n")
-
-;; Test string operations
 (let hello str "Hello, Clumsy!")
+(let strlen_result int (strlen hello))
 (print "String length: ")
-(print (set result (fn [(a *char)] int (+ a 0) (ret (strlen hello)))
-  (print result)
+(print strlen_result)
 (print "\n")
 
 (print "=== All tests completed! ===\n")
-
-(main)

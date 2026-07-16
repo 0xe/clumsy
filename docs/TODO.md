@@ -33,6 +33,13 @@
   `generate_expression` with a `stack_adjustment` parameter. Eliminate by tracking `sp` offset
   in `CodeGen` instead.
 
+- [ ] **No lexical scoping / `let` inside `begin` broken** — `build_symbol_table` only scans
+  top-level statements in the root AST list. Any `let` declared inside a `begin` block is
+  invisible to the codegen, causing "undeclared variable" errors. The compiler has no concept
+  of nested scopes. This is a significant limitation — all variables must be declared at file
+  scope. Fix requires making `build_symbol_table` recurse into nested blocks and create
+  child symbol tables with parent pointers.
+
 - [ ] **String arg handling copy-pasted** — `AST_STRING` in argument lists is handled with the
   same `strdup`/capacity-check block in at least two places. Extract a helper.
 
@@ -87,3 +94,9 @@
   or crash. The compiler doesn't set `x8 = 0` (number of NEON args) before variadic calls,
   and argument registers can be clobbered by nested expression evaluation. Tests must use
   `print_int`/`print_str` helpers from `print_helpers.c` as a workaround.
+
+- [ ] **Examples SIGSEGV at runtime** — Most examples compile and link but crash with
+  segfaults at runtime. Root causes likely include: `+16` stack adjustment bugs in function
+  calls clobbering variable offsets, wrong calling convention for C functions (e.g. missing
+  alignment, wrong arg count), and incorrect struct/array field access. Needs systematic
+  debugging of generated assembly.
