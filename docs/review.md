@@ -35,18 +35,16 @@ CMakeLists.txt configuration.
 
 ---
 
-## 3. Codegen Issues (Open)
+## 3. Codegen Issues (Resolved)
 
-These remain and inform the new codegen design:
-
-| Issue | Impact |
+| Issue | Status |
 |:------|:-------|
-| `+16` stack adjustment magic constant | Variable offsets wrong inside function calls |
-| `generate_expression_with_adjustment` duplication | Code duplication, fragile |
-| No lexical scoping | `let` inside `begin` blocks invisible to codegen |
-| Hardcoded struct/array sizes in arg passing | Corrupts stack for non-standard sizes |
-| `**` calls C `pow()` with wrong ABI | Garbage output for exponentiation |
-| No type checking | Incorrect programs compile silently |
+| `+16` stack adjustment magic constant | **Fixed** — `sp_displacement` tracks transient movement |
+| `generate_expression_with_adjustment` duplication | **Fixed** — removed; displacement is automatic |
+| No lexical scoping | **Fixed** — nested `SymbolTable` tree with `first_child`/`next_sibling` |
+| `**` calls C `pow()` with wrong ABI | **Fixed** — custom integer power helper |
+| Hardcoded struct/array sizes in arg passing | Open — "assuming 2 fields/4 elements" |
+| No type checking | Open — not blocking |
 | `ret` return value paths | Needs verification for all control flow |
 
 ---
