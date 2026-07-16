@@ -7,6 +7,7 @@ A Lisp-style language that compiles to ARM64 assembly (macOS, Apple Silicon).
 ```bash
 cmake -B build && cmake --build build
 # binary: ./build/clumsyc
+# library: ./build/libprint_helpers.a (for linking generated programs)
 ```
 
 ## Usage
@@ -141,6 +142,14 @@ cmake --build build && ctest --test-dir build
 ```
 
 Tests with no `.expected` file are compile-smoke tests only.
+
+## Examples
+
+Example programs live in `examples/`. Build all with:
+
+```bash
+cmake --build build --target examples
+```
 
 ## SDL2 on macOS
 

@@ -1,115 +1,93 @@
 cmake_minimum_required(VERSION 3.16)
 project(clumsyc VERSION 1.0.0 LANGUAGES C)
 
-# Set C standard and compiler flags
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
 
-# Set build type to Release with debug info if not specified
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Build type" FORCE)
 endif()
 
-# Source files
-set(SOURCES
-        src/main.c
-        src/tokenizer.c
-        src/parser.c
-        src/compiler.c
-        src/print_helpers.c
+# --- Compiler ---
+set(COMPILER_SOURCES
+    src/main.c
+    src/tokenizer.c
+    src/parser.c
+    src/compiler.c
 )
 
-# Header files (for IDE organization)
-set(HEADERS
-        src/types.h
-        src/tokenizer.h
-        src/parser.h
-        src/compiler.h
+set(COMPILER_HEADERS
+    src/types.h
+    src/tokenizer.h
+    src/parser.h
+    src/compiler.h
 )
 
-# Create the main executable
-add_executable(clumsyc ${SOURCES} ${HEADERS})
-
-# Set output directory
+add_executable(clumsyc ${COMPILER_SOURCES} ${COMPILER_HEADERS})
 set_target_properties(clumsyc PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
-# Install target
-install(TARGETS clumsyc DESTINATION bin)
+# --- Print helpers (linked into generated programs, not the compiler) ---
+add_library(print_helpers STATIC src/print_helpers.c)
+set_target_properties(print_helpers PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
+)
 
-# Enable testing
+# --- Tests ---
 enable_testing()
 
-# Find test files
 file(GLOB TEST_FILES "${CMAKE_SOURCE_DIR}/tests/*.cpl")
-
-# Create temporary directory for tests
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/tmp)
 
-# Custom target for running tests
-add_custom_target(test-compiler
-        COMMAND ${CMAKE_COMMAND} -E echo "Running compiler tests..."
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-)
-
-# Add individual test cases
 foreach(test_file ${TEST_FILES})
     get_filename_component(test_name ${test_file} NAME_WE)
 
     add_test(
-            NAME ${test_name}
-            COMMAND ${CMAKE_COMMAND}
+        NAME ${test_name}
+        COMMAND ${CMAKE_COMMAND}
             -DCOMPILER=$<TARGET_FILE:clumsyc>
             -DTEST_FILE=${test_file}
-            -DTEST_NAME=${test_name}
             -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
             -DTEST_DIR=${CMAKE_SOURCE_DIR}/tests
-            -DSRC_DIR=${CMAKE_SOURCE_DIR}/src
+            -DPRINT_HELPERS=$<TARGET_FILE:print_helpers>
             -P ${CMAKE_SOURCE_DIR}/test_runner.cmake
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
+    set_tests_properties(${test_name} PROPERTIES DEPENDS "clumsyc;print_helpers")
+endforeach()
 
-    # Make tests depend on the compiler being built
-    set_tests_properties(${test_name} PROPERTIES
-            DEPENDS clumsyc
+# --- Examples ---
+file(GLOB EXAMPLE_FILES "${CMAKE_SOURCE_DIR}/examples/*.cpl")
+
+foreach(example_file ${EXAMPLE_FILES})
+    get_filename_component(example_name ${example_file} NAME_WE)
+
+    add_custom_target(build-${example_name}
+        COMMAND ${CMAKE_COMMAND}
+            -DCOMPILER=$<TARGET_FILE:clumsyc>
+            -DEXAMPLE_FILE=${example_file}
+            -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
+            -DPRINT_HELPERS=$<TARGET_FILE:print_helpers>
+            -P ${CMAKE_SOURCE_DIR}/example_runner.cmake
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        DEPENDS clumsyc print_helpers
+        COMMENT "Building example: ${example_name}"
     )
 endforeach()
 
-# Custom target for verbose testing
-add_custom_target(test-verbose
-        COMMAND ${CMAKE_COMMAND} -E echo "Running compiler tests verbose..."
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+add_custom_target(examples
+    DEPENDS print_helpers
+    COMMENT "Building all examples"
 )
-
-foreach(test_file ${TEST_FILES})
-    add_custom_command(TARGET test-verbose POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E echo "=== Testing ${test_file} ==="
-            COMMAND $<TARGET_FILE:clumsyc> ${test_file}
-            COMMAND ${CMAKE_COMMAND} -E echo ""
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            VERBATIM
-    )
+foreach(example_file ${EXAMPLE_FILES})
+    get_filename_component(example_name ${example_file} NAME_WE)
+    add_dependencies(examples build-${example_name})
 endforeach()
 
-# Static analysis target
-find_program(CLANG_ANALYZER clang)
-if(CLANG_ANALYZER)
-    add_custom_target(analyze
-            COMMAND ${CLANG_ANALYZER} --analyze
-                    -Xanalyzer -analyzer-output=text
-                    -I ${CMAKE_SOURCE_DIR}/src
-                    ${SOURCES}
-            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-            COMMENT "Running clang static analyzer"
-    )
-endif()
-
-# Clean target (CMake handles this automatically, but we can add custom cleanup)
-add_custom_target(clean-all
-        COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/tmp
-        COMMAND ${CMAKE_COMMAND} -E remove -f test_output
-        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+# --- Clean ---
+add_custom_target(clean-extra
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_BINARY_DIR}/tmp
+    COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target clean
 )

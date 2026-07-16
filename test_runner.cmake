@@ -1,59 +1,55 @@
-# Test runner script for CTest
-# This script replicates the complex test logic from the Makefile
+# test_runner.cmake — compile, link, run, and compare output
+#
+# Required variables:
+#   COMPILER       path to clumsyc
+#   TEST_FILE      path to .cpl test source
+#   TMP_DIR        temp directory for intermediate files
+#   TEST_DIR       path to tests/ (for .expected files)
+#   PRINT_HELPERS  path to print_helpers.o
 
-# Extract test name from file
-get_filename_component(TEST_NAME_ONLY ${TEST_FILE} NAME_WE)
+get_filename_component(TEST_NAME ${TEST_FILE} NAME_WE)
 
-# Run the compiler
+# Compile
 execute_process(
-        COMMAND ${COMPILER} ${TEST_FILE}
-        OUTPUT_FILE ${TMP_DIR}/${TEST_NAME_ONLY}.s
-        ERROR_QUIET
-        RESULT_VARIABLE COMPILE_RESULT
+    COMMAND ${COMPILER} ${TEST_FILE}
+    OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.s
+    ERROR_VARIABLE COMPILE_ERR
+    RESULT_VARIABLE COMPILE_RC
 )
-
-if(NOT COMPILE_RESULT EQUAL 0)
-    message(FATAL_ERROR "FAIL (compile error)")
+if(NOT COMPILE_RC EQUAL 0)
+    message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
 endif()
 
-# Try to link with clang
+# Link
 execute_process(
-        COMMAND clang -o ${TMP_DIR}/${TEST_NAME_ONLY}.x
-        ${TMP_DIR}/${TEST_NAME_ONLY}.s
-        ${SRC_DIR}/print_helpers.o
-        ERROR_QUIET
-        RESULT_VARIABLE LINK_RESULT
+    COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.s ${PRINT_HELPERS}
+    ERROR_VARIABLE LINK_ERR
+    RESULT_VARIABLE LINK_RC
 )
-
-if(NOT LINK_RESULT EQUAL 0)
-    message(FATAL_ERROR "FAIL (link error)")
+if(NOT LINK_RC EQUAL 0)
+    message(FATAL_ERROR "FAIL (link error): ${LINK_ERR}")
 endif()
 
-# Check if expected output file exists
-set(EXPECTED_FILE ${TEST_DIR}/${TEST_NAME_ONLY}.expected)
+# Run and compare (only if .expected exists)
+set(EXPECTED_FILE ${TEST_DIR}/${TEST_NAME}.expected)
 if(EXISTS ${EXPECTED_FILE})
-    # Run the executable and capture output
     execute_process(
-            COMMAND ${TMP_DIR}/${TEST_NAME_ONLY}.x
-            OUTPUT_FILE ${TMP_DIR}/${TEST_NAME_ONLY}.actual
-            ERROR_QUIET
-            RESULT_VARIABLE RUN_RESULT
+        COMMAND ${TMP_DIR}/${TEST_NAME}.x
+        OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.actual
+        ERROR_QUIET
+        RESULT_VARIABLE RUN_RC
     )
-
-    if(NOT RUN_RESULT EQUAL 0)
+    if(NOT RUN_RC EQUAL 0)
         message(FATAL_ERROR "FAIL (runtime error)")
     endif()
 
-    # Compare expected vs actual output
     execute_process(
-            COMMAND ${CMAKE_COMMAND} -E compare_files
-            ${EXPECTED_FILE} ${TMP_DIR}/${TEST_NAME_ONLY}.actual
-            RESULT_VARIABLE DIFF_RESULT
+        COMMAND ${CMAKE_COMMAND} -E compare_files ${EXPECTED_FILE} ${TMP_DIR}/${TEST_NAME}.actual
+        RESULT_VARIABLE DIFF_RC
     )
-
-    if(NOT DIFF_RESULT EQUAL 0)
+    if(NOT DIFF_RC EQUAL 0)
         message(FATAL_ERROR "FAIL (output mismatch)")
     endif()
 endif()
 
-message(STATUS "PASS: ${TEST_NAME_ONLY}")
+message(STATUS "PASS: ${TEST_NAME}")
