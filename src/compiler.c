@@ -511,6 +511,14 @@ void emit_arithmetic(CodeGen *codegen, const char *op, const char *dest, const c
     } else if (strcmp(op, ">=") == 0) {
         emit_code(codegen, "    cmp   %s, %s\n", src1, src2);
         emit_code(codegen, "    cset  %s, ge\n", dest);
+    } else if (strcmp(op, "&") == 0) {
+        emit_code(codegen, "    and   %s, %s, %s\n", dest, src1, src2);
+    } else if (strcmp(op, "|") == 0) {
+        emit_code(codegen, "    orr   %s, %s, %s\n", dest, src1, src2);
+    } else if (strcmp(op, ">>") == 0) {
+        emit_code(codegen, "    lsr   %s, %s, %s\n", dest, src1, src2);
+    } else if (strcmp(op, "<<") == 0) {
+        emit_code(codegen, "    lsl   %s, %s, %s\n", dest, src1, src2);
     }
 }
 
@@ -648,7 +656,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                 ASTNode *op = expr->data.list.children[0];
                 
                 if (op->type == AST_IDENTIFIER) {
-                    // Handle arithmetic and comparison operators
+                    // Handle arithmetic, comparison, and bitwise operators
                     if (strcmp(op->data.string_value, "+") == 0 ||
                         strcmp(op->data.string_value, "-") == 0 ||
                         strcmp(op->data.string_value, "*") == 0 ||
@@ -659,7 +667,11 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                         strcmp(op->data.string_value, "<") == 0 ||
                         strcmp(op->data.string_value, ">") == 0 ||
                         strcmp(op->data.string_value, "<=") == 0 ||
-                        strcmp(op->data.string_value, ">=") == 0) {
+                        strcmp(op->data.string_value, ">=") == 0 ||
+                        strcmp(op->data.string_value, "&") == 0 ||
+                        strcmp(op->data.string_value, "|") == 0 ||
+                        strcmp(op->data.string_value, ">>") == 0 ||
+                        strcmp(op->data.string_value, "<<") == 0) {
                         
                         if (expr->data.list.count >= 3) {
                             // Generate code for operands
@@ -712,20 +724,20 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             generate_expression(codegen, operand, symbols);
                             emit_code(codegen, "    ldr   x0, [x0]\n");
                         }
-                    }
-                    // Handle address-of: (& x) — compute stack address of x
-                    else if (strcmp(op->data.string_value, "&") == 0 && expr->data.list.count == 2) {
-                        ASTNode *operand = expr->data.list.children[1];
-                        if (operand->type == AST_IDENTIFIER) {
-                            int offset = get_symbol_offset(symbols, operand->data.string_value);
-                            if (offset >= 0) {
-                                emit_code(codegen, "    mov   x0, sp\n");
-                                emit_code(codegen, "    add   x0, x0, #%d\n", offset + codegen->sp_displacement);
+                        // Handle address-of: (& x) — compute stack address of x
+                        else if (strcmp(op->data.string_value, "&") == 0 && expr->data.list.count == 2) {
+                            ASTNode *operand = expr->data.list.children[1];
+                            if (operand->type == AST_IDENTIFIER) {
+                                int offset = get_symbol_offset(symbols, operand->data.string_value);
+                                if (offset >= 0) {
+                                    emit_code(codegen, "    mov   x0, sp\n");
+                                    emit_code(codegen, "    add   x0, x0, #%d\n", offset + codegen->sp_displacement);
+                                } else {
+                                    emit_mov_immediate(codegen, "x0", 0);
+                                }
                             } else {
                                 emit_mov_immediate(codegen, "x0", 0);
                             }
-                        } else {
-                            emit_mov_immediate(codegen, "x0", 0);
                         }
                     }
                     // Handle logical not: (not expr)
@@ -734,6 +746,13 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                         generate_expression(codegen, operand, symbols);
                         emit_code(codegen, "    cmp   x0, #0\n");
                         emit_code(codegen, "    cset  x0, eq\n");
+                    }
+                    // Handle bitwise not: (~ expr)
+                    else if (strcmp(op->data.string_value, "~") == 0 && expr->data.list.count == 2) {
+                        ASTNode *operand = expr->data.list.children[1];
+                        generate_expression(codegen, operand, symbols);
+                        emit_code(codegen, "    mvn   x0, x0\n");
+                        emit_code(codegen, "    and   x0, x0, #0xFFFFFFFF\n");
                     }
                     // Handle array access: ([] array_var index)
                     else if (strcmp(op->data.string_value, "[]") == 0) {

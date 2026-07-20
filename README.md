@@ -142,3 +142,15 @@ something.initial
 ## TODO
 
 - refactor for understandability
+
+I hope to use this as a vehicle to
+
+- build a new IR
+- CFG / DFA on the IR (allen / killdall)
+- SSA (braun)
+- maybe a few scalar optimizations
+
+and then, two/three backends:
+
+- compile to LLVM IR / qbe
+- compile to armv8/macos with custom codegen
