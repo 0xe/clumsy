@@ -2,10 +2,13 @@
 
 Focus: preparing for the new codegen (IR → CFG/DFA → SSA → backends).
 
-## Codegen-blocking
+## Next session
 
-- [ ] **Examples SIGSEGV at runtime** — Some examples still crash with segfaults.
-  Remaining root causes under investigation.
+- [ ] **Fix example SIGSEGVs** — Root causes identified and fixed: negative literals, wrong
+  extern declarations, struct-passing via int. SDL examples now use only correct API calls.
+  Need to verify SDL examples run on a machine with display.
+
+## Codegen-blocking
 
 ## Cleanup
 
@@ -22,7 +25,7 @@ Focus: preparing for the new codegen (IR → CFG/DFA → SSA → backends).
 
 ## Missing language features (for later)
 
-- [ ] **Negative integer literals** — `-1` cannot be written directly; must use `(- 0 1)`.
+- [x] **Negative integer literals** — Done. `-1`, `-100` etc. work as literals in the tokenizer.
 - [ ] **Null/void types** — No `null` literal or `void` type.
 - [ ] **Bitwise operators** — No `&`, `|`, `^`, `~`, `<<`, `>>`.
 - [ ] **String operations** — No concatenation, comparison, or length.

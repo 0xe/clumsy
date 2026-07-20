@@ -1,39 +1,33 @@
 // Comprehensive SDL bindings for Tetris
+// This is a reference bindings file, not a standalone program.
 
 // SDL Core
-(extern SDL_Init [uint32_t] int)
+(extern SDL_Init [int] int)
 (extern SDL_Quit [] void)
-(extern SDL_Delay [uint32_t] void)
+(extern SDL_Delay [int] void)
 
 // Video
-(extern SDL_CreateWindow [*char int int int] *void)
-(extern SDL_DestroyWindow [*void] void)
-(extern SDL_GetWindowSurface [*void] *void)
-(extern SDL_UpdateWindowSurface [*void] *void] *void)
+(extern SDL_CreateWindow [(* char) int int int int int] (* void))
+(extern SDL_DestroyWindow [(* void)] void)
+(extern SDL_GetWindowSurface [(* void)] (* void))
+(extern SDL_UpdateWindowSurface [(* void)] int)
 
-// Renderer  
-(extern SDL_CreateRenderer [*void] int int] *void)
-(extern SDL_DestroyRenderer [*void] void)
-(extern SDL_SetRenderDrawColor [*void uint8_t uint8_t uint8_t] int)
-(extern SDL_RenderClear [*void] int)
-(extern SDL_RenderPresent [*void] void)
-(extern SDL_CreateTexture [*void] *int int int int] *void)
-(extern SDL_DestroyTexture [*void] void)
-(extern SDL_RenderCopy [*void] *void *int] int int int])
-(extern SDL_QueryTexture [*void] *int int *int] int *int])
+// Renderer
+(extern SDL_CreateRenderer [(* void) int int] (* void))
+(extern SDL_DestroyRenderer [(* void)] void)
+(extern SDL_SetRenderDrawColor [(* void) int int int int] int)
+(extern SDL_RenderClear [(* void)] int)
+(extern SDL_RenderPresent [(* void)] void)
+(extern SDL_CreateTexture [(* void) int int int int] (* void))
+(extern SDL_DestroyTexture [(* void)] void)
+(extern SDL_RenderCopy [(* void) (* void) (* void)] int)
+(extern SDL_QueryTexture [(* void) (* void) (* void) (* void)] int)
 
 // Events
-(extern SDL_PollEvent [*void] int)
-(extern SDL_WaitEvent [*void] int)
+(extern SDL_PollEvent [(* void)] int)
+(extern SDL_WaitEvent [(* void)] int)
 
 // SDL Constants
 (let SDL_INIT_VIDEO int 0x00000020)
 (let SDL_WINDOWPOS_UNDEFINED int 0x1FFF0000)
 (let SDL_WINDOW_SHOWN int 0x00000004)
-
-// Rectangle and Point structs
-(let SDL_Rect struct #((x int) (y int) (w int) (h int)))
-(let SDL_Point struct #((x int) (y int)))
-
-// Colors
-(let SDL_Color struct #((r uint8_t) (g uint8_t) (b uint8_t) (a uint8_t)))

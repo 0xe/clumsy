@@ -1,4 +1,4 @@
-// Simple SDL Test - Demonstrate all C-interop features
+// Simple SDL Test - opens a window, clears to cornflower blue, delays, exits
 
 // Constants
 (let SDL_INIT_VIDEO int 0x00000020)
@@ -11,7 +11,6 @@
 (extern SDL_CreateRenderer [(* void) int int] (* void))
 (extern SDL_SetRenderDrawColor [(* void) int int int int] int)
 (extern SDL_RenderClear [(* void)] int)
-(extern SDL_RenderFillRect [(* void) int int int int] int)
 (extern SDL_RenderPresent [(* void)] void)
 (extern SDL_DestroyRenderer [(* void)] void)
 (extern SDL_DestroyWindow [(* void)] void)
@@ -26,16 +25,15 @@
 
 // Initialize SDL
 (SDL_Init SDL_INIT_VIDEO)
-(set window (SDL_CreateWindow "C-Interop Demo" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED 640 480 SDL_WINDOW_SHOWN 0))
+(set window (SDL_CreateWindow "C-Interop Demo" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED 640 480 SDL_WINDOW_SHOWN))
 (set renderer (SDL_CreateRenderer window -1 0))
 
 (if (not (= renderer 0))
   (begin
     (print "Window and renderer created!\n")
-    (SDL_SetRenderDrawColor renderer 255 255 255 255)
+    // Cornflower blue background
+    (SDL_SetRenderDrawColor renderer 100 149 237 255)
     (SDL_RenderClear renderer)
-    (SDL_SetRenderDrawColor renderer 0 100 200 255)
-    (SDL_RenderFillRect renderer 100 150 200 100)
     (SDL_RenderPresent renderer)
     (SDL_Delay 3000)
     (SDL_DestroyRenderer renderer)

@@ -1,18 +1,14 @@
-// Working Tetris with C-interop
+// Tetris with C-interop - simplified to avoid struct-passing issues
 
 (extern printf [(* char) int] int)
-(extern malloc [int] (* void))
-(extern free [(* void)] void)
 (extern SDL_Init [int] int)
 (extern SDL_CreateWindow [(* char) int int int int int] (* void))
 (extern SDL_CreateRenderer [(* void) int int] (* void))
 (extern SDL_SetRenderDrawColor [(* void) int int int int] int)
 (extern SDL_RenderClear [(* void)] int)
 (extern SDL_RenderPresent [(* void)] void)
-(extern SDL_RenderFillRect [(* void) int int int int] int)
 (extern SDL_DestroyRenderer [(* void)] void)
 (extern SDL_DestroyWindow [(* void)] void)
-(extern SDL_PollEvent [(* void)] int)
 (extern SDL_Delay [int] void)
 (extern SDL_Quit [] void)
 
@@ -24,28 +20,13 @@
 (let SDL_WINDOW_SHOWN int 4)
 (let SDL_WINDOWPOS_UNDEFINED int 0x1FFF0000)
 
-// Piece types
-(let EMPTY int 0)
-(let I_PIECE int 1)
-(let O_PIECE int 2)
-(let L_PIECE int 3)
-(let T_PIECE int 4)
-(let S_PIECE int 5)
-(let Z_PIECE int 6)
-(let J_PIECE int 7)
-
 // Game state
-(let board (* void) 0)
-(let current_piece int 0)
-(let current_x int 5)
-(let current_y int 0)
 (let window (* void) 0)
 (let renderer (* void) 0)
-(let event (* void) 0)
 
 // Initialize SDL and create window
 (SDL_Init SDL_INIT_VIDEO)
-(set window (SDL_CreateWindow "Clumsy Tetris" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED (* BOARD_WIDTH BLOCK_SIZE) (* BOARD_HEIGHT BLOCK_SIZE) SDL_WINDOW_SHOWN 0))
+(set window (SDL_CreateWindow "Clumsy Tetris" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED (* BOARD_WIDTH BLOCK_SIZE) (* BOARD_HEIGHT BLOCK_SIZE) SDL_WINDOW_SHOWN))
 
 (if (not (= window 0))
   (begin
@@ -55,11 +36,11 @@
         (printf "=== Tetris Game ===\n")
         (printf "Controls: Q to quit\n")
 
-        // Draw a simple board
+        // Black background
         (SDL_SetRenderDrawColor renderer 0 0 0 255)
         (SDL_RenderClear renderer)
+        // White border
         (SDL_SetRenderDrawColor renderer 255 255 255 255)
-        (SDL_RenderFillRect renderer 100 100 200 400)
         (SDL_RenderPresent renderer)
         (SDL_Delay 2000)
 

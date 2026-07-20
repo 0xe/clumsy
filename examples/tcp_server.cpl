@@ -9,20 +9,23 @@
 (extern SDLNet_TCP_Send [(* void) (* void) int] int)
 (extern SDL_Delay [int] void)
 (extern SDL_Quit [] void)
+(extern malloc [int] (* void))
 
 // Constants
 (let SDL_INIT_VIDEO int 0)
 (let PORT int 8080)
 
-// State (declared at top level so build_symbol_table finds them)
-(let sdl_result int 0)
+// State
 (let net_result int 0)
-(let ip int 0)
+(let ip (* void) 0)
 (let resolve_result int 0)
 (let server_socket (* void) 0)
 
+// Allocate memory for IPaddress struct (8 bytes: host + port)
+(set ip (malloc 8))
+
 // Initialize systems
-(set sdl_result (SDL_Init SDL_INIT_VIDEO))
+(SDL_Init SDL_INIT_VIDEO)
 (set net_result (SDLNet_Init))
 
 (if (= net_result 0)

@@ -213,6 +213,33 @@ TokenArray *tokenize(const char *source) {
             continue;
         }
 
+        // negative numbers: - immediately followed by digit
+        if (c == '-' && idx + 1 < len && is_digit(source[idx + 1])) {
+            int start_idx = idx;
+            idx++; // skip the minus
+            if (source[idx] == '0' && idx + 1 < len && (source[idx + 1] == 'x' || source[idx + 1] == 'X')) {
+                idx += 2; column += 2;
+                while (idx < len && (is_digit(source[idx]) ||
+                       (source[idx] >= 'a' && source[idx] <= 'f') ||
+                       (source[idx] >= 'A' && source[idx] <= 'F'))) {
+                    idx++; column++;
+                }
+            } else {
+                while (idx < len && is_digit(source[idx])) {
+                    idx++; column++;
+                }
+            }
+
+            int num_len = idx - start_idx;
+            char *num_str = malloc(num_len + 1);
+            strncpy(num_str, source + start_idx, num_len);
+            num_str[num_len] = '\0';
+
+            token_array_add(tokens, create_token(TOKEN_INT, num_str, line, column - num_len));
+            free(num_str);
+            continue;
+        }
+
         // numbers (decimal and hex 0x...)
         if (is_digit(c)) {
             int start_idx = idx;
