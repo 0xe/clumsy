@@ -13,6 +13,8 @@ typedef struct {
     size_t string_count;
     size_t string_capacity;
     int sp_displacement;  // tracks transient sp movement from call frame push/pop
+    int scratch_offset;   // stack offset for binary expression scratch slots (beyond all local vars)
+    int scratch_depth;    // nesting depth for scratch slot allocation
 } CodeGen;
 
 // Compiler functions

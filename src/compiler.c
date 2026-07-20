@@ -25,6 +25,8 @@ CodeGen *create_codegen(void) {
     codegen->string_count = 0;
     codegen->string_capacity = 0;
     codegen->sp_displacement = 0;
+    codegen->scratch_offset = 0;
+    codegen->scratch_depth = 0;
     
     return codegen;
 }
@@ -456,7 +458,23 @@ void generate_preamble(CodeGen *codegen) {
 }
 
 void emit_mov_immediate(CodeGen *codegen, const char *reg, int value) {
-    emit_code(codegen, "    mov   %s, #%d\n", reg, value);
+    if (value >= -256 && value <= 255) {
+        emit_code(codegen, "    mov   %s, #%d\n", reg, value);
+        return;
+    }
+    // Derive w register name from x register name
+    const char *wreg = reg;
+    if (reg[0] == 'x') {
+        static char wbuf[4] = "w0";
+        wbuf[1] = reg[1];
+        wreg = wbuf;
+    }
+    uint32_t uval = (uint32_t)value;
+    emit_code(codegen, "    movz  %s, #0x%x\n", wreg, uval & 0xFFFF);
+    if ((uval & 0xFFFF0000) != 0) {
+        emit_code(codegen, "    movk  %s, #0x%x, lsl #16\n", wreg, (uval >> 16) & 0xFFFF);
+    }
+    emit_code(codegen, "    sxtw  %s, %s\n", reg, wreg);
 }
 
 void emit_push_call_frame(CodeGen *codegen) {
@@ -546,8 +564,10 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
     int arg_count = expr->data.list.count - 1;
     if (arg_count < 0) arg_count = 0;
 
-    // Pass 1: evaluate each arg and store to a spill slot
-    // Each arg gets exactly one 8-byte slot (structs/arrays are handled separately below)
+    // Spill layout (Darwin ARM64 variadic ABI):
+    // [sp, #0] = arg1, [sp, #8] = arg2, ... [sp, (N-2)*8] = argN-1  (overflow area for variadic)
+    // [sp, (N-1)*8] = arg0  (named arg, NOT in overflow area)
+    // This ensures va_start's __stack points to the first variadic arg.
     int spill_size = arg_count * 8;
     if (spill_size % 16 != 0) spill_size += 16 - (spill_size % 16);
     if (spill_size > 0) {
@@ -557,7 +577,8 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
 
     for (int i = 0; i < arg_count; i++) {
         ASTNode *arg = expr->data.list.children[i + 1];
-        int slot = i * 8;
+        // arg0 goes to slot (N-1), arg_i (i>0) goes to slot (i-1)
+        int slot = (i == 0 && arg_count > 1) ? (arg_count - 1) * 8 : (i > 0 ? (i - 1) * 8 : 0);
 
         if (arg->type == AST_INT) {
             emit_mov_immediate(codegen, "x0", arg->data.int_value);
@@ -565,7 +586,6 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
         } else if (arg->type == AST_IDENTIFIER) {
             Symbol *arg_sym = find_symbol(symbols, arg->data.string_value);
             if (arg_sym && (arg_sym->type == SYM_STRUCT || arg_sym->type == SYM_ARRAY)) {
-                // For structs/arrays, load the base address or first element
                 int off = get_symbol_offset(symbols, arg->data.string_value);
                 emit_code(codegen, "    mov   x9, sp\n");
                 emit_code(codegen, "    add   x9, x9, #%d\n", off + codegen->sp_displacement - spill_size);
@@ -599,18 +619,15 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
         }
     }
 
-    // Pass 2: load from spill slots into argument registers
+    // Load from spill slots into argument registers
+    // x0 gets arg0 (at slot N-1 if multi-arg, slot 0 if single-arg)
+    // x1..x7 get args 1..7 (at slots 0..6)
     for (int i = 0; i < arg_count && i < 8; i++) {
-        emit_code(codegen, "    ldr   x%d, [sp, #%d]\n", i, i * 8);
+        int slot = (i == 0 && arg_count > 1) ? (arg_count - 1) * 8 : (i > 0 ? (i - 1) * 8 : 0);
+        emit_code(codegen, "    ldr   x%d, [sp, #%d]\n", i, slot);
     }
 
-    // Deallocate spill space
-    if (spill_size > 0) {
-        codegen->sp_displacement -= spill_size;
-        emit_code(codegen, "    add   sp, sp, #%d\n", spill_size);
-    }
-
-    // Call the function
+    // Call the function (keep spill on stack for variadic functions)
     if (func_symbol->type == SYM_C_FUNCTION) {
         char *c_func_name = malloc(strlen(func_symbol->type_info.c_function.c_name) + 2);
         sprintf(c_func_name, "_%s", func_symbol->type_info.c_function.c_name);
@@ -618,6 +635,12 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
         free(c_func_name);
     } else {
         emit_code(codegen, "    bl    %s\n", op->data.string_value);
+    }
+
+    // Deallocate spill space AFTER call (variadic funcs read args from stack)
+    if (spill_size > 0) {
+        codegen->sp_displacement -= spill_size;
+        emit_code(codegen, "    add   sp, sp, #%d\n", spill_size);
     }
 
     emit_pop_call_frame(codegen);
@@ -688,23 +711,34 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             ASTNode *left = expr->data.list.children[1];
                             ASTNode *right = expr->data.list.children[2];
                             
-                            // Check if right operand contains function calls that might corrupt x2
-                            bool right_has_function_call = false;
-                            if (right->type == AST_LIST) {
-                                // This is a simplification - assume any complex expression might have function calls
-                                right_has_function_call = true;
-                            }
+                            // Check if right operand is a complex expression that might clobber x2
+                            bool right_is_complex = (right->type == AST_LIST);
                             
-                            if (right_has_function_call && left->type == AST_IDENTIFIER) {
-                                // Load right operand first to avoid register corruption
+                            if (right_is_complex) {
+                                // Evaluate left into x0
+                                if (left->type == AST_INT) {
+                                    emit_mov_immediate(codegen, "x0", left->data.int_value);
+                                } else if (left->type == AST_IDENTIFIER) {
+                                    emit_load_variable(codegen, "x0", left->data.string_value, symbols);
+                                } else if (left->type == AST_LIST) {
+                                    generate_expression(codegen, left, symbols);
+                                }
+                                
+                                // Spill left to per-depth scratch slot
+                                int slot = codegen->scratch_offset + 8 * codegen->scratch_depth;
+                                emit_code(codegen, "    str   x0, [sp, #%d]\n", slot);
+                                codegen->scratch_depth++;
+                                
+                                // Evaluate right into x3
                                 generate_expression(codegen, right, symbols);
                                 emit_code(codegen, "    mov   x3, x0\n");
                                 
-                                // Then load left operand into x2
-                                emit_load_variable(codegen, "x2", left->data.string_value, symbols);
+                                // Reload left from scratch slot
+                                codegen->scratch_depth--;
+                                slot = codegen->scratch_offset + 8 * codegen->scratch_depth;
+                                emit_code(codegen, "    ldr   x2, [sp, #%d]\n", slot);
                             } else {
-                                // Standard order: load left, then right
-                                // Load left operand into x2
+                                // Simple right: safe to load left into x2 first
                                 if (left->type == AST_INT) {
                                     emit_mov_immediate(codegen, "x2", left->data.int_value);
                                 } else if (left->type == AST_IDENTIFIER) {
@@ -780,7 +814,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                     if (index->type == AST_INT) {
                                         // Static index - calculate offset directly
                                         element_offset = index->data.int_value * 8;  // 8 bytes per element
-                                        emit_code(codegen, "    ldr   x0, [sp, #%d]\n", array_offset + element_offset);
+                                        emit_code(codegen, "    ldr   x0, [sp, #%d]\n", array_offset + element_offset + codegen->sp_displacement);
                                     } else {
                                         // Dynamic index - need to calculate at runtime
                                         // Load index into x1
@@ -792,12 +826,12 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                                         }
                                         
                                         // Calculate element address: base + (index * 8)
-                                        emit_code(codegen, "    mov   x2, #8\n");
-                                        emit_code(codegen, "    mul   x1, x1, x2\n");
-                                        emit_code(codegen, "    mov   x2, sp\n");
-                                        emit_code(codegen, "    add   x2, x2, #%d\n", array_offset);
-                                        emit_code(codegen, "    add   x2, x2, x1\n");
-                                        emit_code(codegen, "    ldr   x0, [x2]\n");
+                                        emit_code(codegen, "    mov   x9, #8\n");
+                                        emit_code(codegen, "    mul   x1, x1, x9\n");
+                                        emit_code(codegen, "    mov   x9, sp\n");
+                                        emit_code(codegen, "    add   x9, x9, #%d\n", array_offset + codegen->sp_displacement);
+                                        emit_code(codegen, "    add   x9, x9, x1\n");
+                                        emit_code(codegen, "    ldr   x0, [x9]\n");
                                     }
                                 } else {
                                     emit_mov_immediate(codegen, "x0", 0);
@@ -994,11 +1028,17 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                 if (init->type == AST_ARRAY) {
                     // Handle AST_ARRAY type: [1 2 3 4]
                     int base_offset = get_symbol_offset(symbols, name_node->data.string_value);
+                    Symbol *arr_sym = find_symbol(symbols, name_node->data.string_value);
+                    int declared_size = (arr_sym && arr_sym->type == SYM_ARRAY) ? arr_sym->type_info.array.size : (int)init->data.list.count;
                     for (size_t i = 0; i < init->data.list.count; i++) {
                         ASTNode *element = init->data.list.children[i];
                         generate_expression(codegen, element, symbols);
                         // Store each element at base + element_index * 8
                         emit_code(codegen, "    str   x0, [sp, #%d]\n", base_offset + (int)i * 8);
+                    }
+                    // Zero-fill remaining elements
+                    for (size_t i = init->data.list.count; i < (size_t)declared_size; i++) {
+                        emit_code(codegen, "    str   xzr, [sp, #%d]\n", base_offset + (int)i * 8);
                     }
                 } else if (init->type == AST_LIST && init->data.list.count >= 2) {
                     ASTNode *init_op = init->data.list.children[0];
@@ -1099,10 +1139,10 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                     int array_offset = get_symbol_offset(symbols, array_var->data.string_value);
                     
                     if (index->type == AST_INT) {
-                        emit_code(codegen, "    str   x0, [sp, #%d]\n", array_offset + index->data.int_value * 8);
+                        emit_code(codegen, "    str   x0, [sp, #%d]\n", array_offset + index->data.int_value * 8 + codegen->sp_displacement);
                     } else {
                         // Dynamic index: save value, compute address, store
-                        emit_code(codegen, "    mov   x2, x0\n");
+                        emit_code(codegen, "    mov   x10, x0\n");
                         
                         if (index->type == AST_IDENTIFIER) {
                             emit_load_variable(codegen, "x1", index->data.string_value, symbols);
@@ -1111,12 +1151,12 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                             emit_code(codegen, "    mov   x1, x0\n");
                         }
                         
-                        emit_code(codegen, "    mov   x3, #8\n");
-                        emit_code(codegen, "    mul   x1, x1, x3\n");
-                        emit_code(codegen, "    mov   x3, sp\n");
-                        emit_code(codegen, "    add   x3, x3, #%d\n", array_offset);
-                        emit_code(codegen, "    add   x3, x3, x1\n");
-                        emit_code(codegen, "    str   x2, [x3]\n");
+                        emit_code(codegen, "    mov   x9, #8\n");
+                        emit_code(codegen, "    mul   x1, x1, x9\n");
+                        emit_code(codegen, "    mov   x9, sp\n");
+                        emit_code(codegen, "    add   x9, x9, #%d\n", array_offset + codegen->sp_displacement);
+                        emit_code(codegen, "    add   x9, x9, x1\n");
+                        emit_code(codegen, "    str   x10, [x9]\n");
                     }
                     return;
                 }
@@ -1337,6 +1377,8 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
             
             // Calculate and allocate stack space (includes nested scopes)
             stack_space = total_tree_size(func_symbols);
+            codegen->scratch_offset = stack_space;
+            stack_space += 128;
             if (stack_space % 16 != 0) {
                 stack_space += 16 - (stack_space % 16);
             }
@@ -1407,12 +1449,17 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
     
     // Cleanup stack space (including nested scopes)
     {
-        int cleanup_space = total_tree_size(func_symbols);
+        int cleanup_space = total_tree_size(func_symbols) + 128;
         if (cleanup_space % 16 != 0) {
             cleanup_space += 16 - (cleanup_space % 16);
         }
         if (cleanup_space > 0) {
-            emit_code(codegen, "    add   sp, sp, #%d\n", cleanup_space);
+            if (cleanup_space <= 4095) {
+                emit_code(codegen, "    add   sp, sp, #%d\n", cleanup_space);
+            } else {
+                emit_mov_immediate(codegen, "x9", cleanup_space);
+                emit_code(codegen, "    add   sp, sp, x9\n");
+            }
         }
     }
     
@@ -1448,13 +1495,21 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
     
     // Calculate stack space needed (functions don't get stack slots)
     int stack_space = total_tree_size(symbols);
+    // Reserve 128 bytes of scratch space for binary expression spills
+    codegen->scratch_offset = stack_space;
+    stack_space += 128;
     if (stack_space % 16 != 0) {
         stack_space += 16 - (stack_space % 16);
     }
     
     // Allocate stack space
     if (stack_space > 0) {
-        emit_code(codegen, "    sub   sp, sp, #%d\n", stack_space);
+        if (stack_space <= 4095) {
+            emit_code(codegen, "    sub   sp, sp, #%d\n", stack_space);
+        } else {
+            emit_mov_immediate(codegen, "x9", stack_space);
+            emit_code(codegen, "    sub   sp, sp, x9\n");
+        }
     }
     
 // Generate code for each statement (skip function definitions)
@@ -1510,7 +1565,12 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
     
     // Deallocate stack space
     if (stack_space > 0) {
-        emit_code(codegen, "    add   sp, sp, #%d\n", stack_space);
+        if (stack_space <= 4095) {
+            emit_code(codegen, "    add   sp, sp, #%d\n", stack_space);
+        } else {
+            emit_mov_immediate(codegen, "x9", stack_space);
+            emit_code(codegen, "    add   sp, sp, x9\n");
+        }
     }
     
     // Restore frame pointer and return address, then exit
