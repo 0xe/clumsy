@@ -155,6 +155,12 @@ static void collect_symbols_from_stmt(ASTNode *stmt, SymbolTable *table) {
                             (strcmp(type_op->data.string_value, "array_type") == 0 ||
                              strcmp(type_op->data.string_value, "[]") == 0)) {
                             symbol.type = SYM_ARRAY;
+                            if (type_node->data.list.count >= 3) {
+                                ASTNode *size_node = type_node->data.list.children[2];
+                                if (size_node->type == AST_INT) {
+                                    symbol.type_info.array.size = size_node->data.int_value;
+                                }
+                            }
                         } else if (type_op->type == AST_IDENTIFIER && 
                                    strcmp(type_op->data.string_value, "*") == 0) {
                             symbol.type = SYM_POINTER;
@@ -263,7 +269,11 @@ SymbolTable *build_symbol_table(ASTNode *ast) {
 }
 
 static int symbol_stack_size(Symbol *sym) {
-    if (sym->type == SYM_ARRAY) return 32;
+    if (sym->type == SYM_ARRAY) {
+        int size = sym->type_info.array.size;
+        if (size <= 0) size = 4;
+        return size * 8;
+    }
     if (sym->type == SYM_STRUCT) return 16;
     return 8;
 }
@@ -1072,12 +1082,46 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
             }
         }
     } else if (strcmp(op->data.string_value, "set") == 0) {
-        // Variable assignment: (set name value)
+        // Variable assignment: (set name value) or (set ([] arr index) value)
         if (stmt->data.list.count >= 3) {
             ASTNode *name_node = stmt->data.list.children[1];
             ASTNode *value = stmt->data.list.children[2];
             
             generate_expression(codegen, value, symbols);
+            
+            // Check if target is array element: (set ([] arr index) value)
+            if (name_node->type == AST_LIST && name_node->data.list.count >= 3) {
+                ASTNode *access_op = name_node->data.list.children[0];
+                if (access_op->type == AST_IDENTIFIER && strcmp(access_op->data.string_value, "[]") == 0) {
+                    ASTNode *array_var = name_node->data.list.children[1];
+                    ASTNode *index = name_node->data.list.children[2];
+                    
+                    int array_offset = get_symbol_offset(symbols, array_var->data.string_value);
+                    
+                    if (index->type == AST_INT) {
+                        emit_code(codegen, "    str   x0, [sp, #%d]\n", array_offset + index->data.int_value * 8);
+                    } else {
+                        // Dynamic index: save value, compute address, store
+                        emit_code(codegen, "    mov   x2, x0\n");
+                        
+                        if (index->type == AST_IDENTIFIER) {
+                            emit_load_variable(codegen, "x1", index->data.string_value, symbols);
+                        } else {
+                            generate_expression(codegen, index, symbols);
+                            emit_code(codegen, "    mov   x1, x0\n");
+                        }
+                        
+                        emit_code(codegen, "    mov   x3, #8\n");
+                        emit_code(codegen, "    mul   x1, x1, x3\n");
+                        emit_code(codegen, "    mov   x3, sp\n");
+                        emit_code(codegen, "    add   x3, x3, #%d\n", array_offset);
+                        emit_code(codegen, "    add   x3, x3, x1\n");
+                        emit_code(codegen, "    str   x2, [x3]\n");
+                    }
+                    return;
+                }
+            }
+            
             emit_store_variable(codegen, "x0", name_node->data.string_value, symbols);
         }
     } else if (strcmp(op->data.string_value, "print") == 0) {

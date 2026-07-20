@@ -1,0 +1,25 @@
+// Test large arrays and element assignment
+(let board int[20] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0])
+
+// Set some cells
+(set board[0] 42)
+(set board[9] 99)
+(set board[19] 7)
+
+// Read them back
+(print board[0])
+(print board[9])
+(print board[19])
+
+// Dynamic index
+(let i int 5)
+(set board[i] 33)
+(print board[i])
+
+// Arithmetic with array access
+(print (+ board[0] 1))
+
+// Second large array to test no overlap
+(let scores int[10] [10 20 30 40 50 60 70 80 90 100])
+(set scores[3] 999)
+(print scores[3])
