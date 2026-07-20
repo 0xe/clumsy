@@ -1,4 +1,4 @@
 // Simple test to verify C-interop works
 (extern puts [*char] int)
 
-(puts null)
+(puts 0)

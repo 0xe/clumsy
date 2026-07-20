@@ -4,9 +4,8 @@ Focus: preparing for the new codegen (IR → CFG/DFA → SSA → backends).
 
 ## Next session
 
-- [ ] **Fix example SIGSEGVs** — Root causes identified and fixed: negative literals, wrong
-  extern declarations, struct-passing via int. SDL examples now use only correct API calls.
-  Need to verify SDL examples run on a machine with display.
+- [ ] **Verify SDL examples run on machine with display** — Arg register clobbering fixed
+  (two-pass spill-slot evaluation), negative literals fixed, extern declarations corrected.
 
 ## Codegen-blocking
 
