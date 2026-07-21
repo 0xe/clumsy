@@ -1,29 +1,48 @@
-# example_runner.cmake — compile and link an example program
+# example_runner.cmake — compile and link example program(s)
 #
 # Required variables:
 #   COMPILER       path to clumsyc
-#   EXAMPLE_FILE   path to .cpl example source
+#   EXAMPLE_FILES  space-separated list of .cpl source files (or single file for backward compat)
 #   TMP_DIR        temp directory for intermediate files
 #   PRINT_HELPERS  path to print_helpers.o
 #
 # Optional variables:
 #   LINK_LIBS      extra link libraries (e.g. "-lSDL2")
 
-get_filename_component(EXAMPLE_NAME ${EXAMPLE_FILE} NAME_WE)
+# Get example name from first file
+list(GET EXAMPLE_FILES 0 FIRST_FILE)
+get_filename_component(EXAMPLE_NAME ${FIRST_FILE} NAME_WE)
 
-# Compile
-execute_process(
-    COMMAND ${COMPILER} ${EXAMPLE_FILE}
-    OUTPUT_FILE ${TMP_DIR}/${EXAMPLE_NAME}.s
-    ERROR_VARIABLE COMPILE_ERR
-    RESULT_VARIABLE COMPILE_RC
-)
-if(NOT COMPILE_RC EQUAL 0)
-    message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
-endif()
+# Compile each .cpl to .o
+set(OBJECT_FILES "")
+foreach(example_file ${EXAMPLE_FILES})
+    get_filename_component(file_name ${example_file} NAME_WE)
+    
+    execute_process(
+        COMMAND ${COMPILER} ${example_file}
+        OUTPUT_FILE ${TMP_DIR}/${file_name}.s
+        ERROR_VARIABLE COMPILE_ERR
+        RESULT_VARIABLE COMPILE_RC
+    )
+    if(NOT COMPILE_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (compile error in ${file_name}): ${COMPILE_ERR}")
+    endif()
+    
+    # Assemble to .o
+    execute_process(
+        COMMAND as -o ${TMP_DIR}/${file_name}.o ${TMP_DIR}/${file_name}.s
+        ERROR_VARIABLE ASM_ERR
+        RESULT_VARIABLE ASM_RC
+    )
+    if(NOT ASM_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (assembly error in ${file_name}): ${ASM_ERR}")
+    endif()
+    
+    list(APPEND OBJECT_FILES ${TMP_DIR}/${file_name}.o)
+endforeach()
 
 # Link
-set(LINK_CMD clang -o ${TMP_DIR}/${EXAMPLE_NAME}.x ${TMP_DIR}/${EXAMPLE_NAME}.s ${PRINT_HELPERS})
+set(LINK_CMD clang -o ${TMP_DIR}/${EXAMPLE_NAME}.x ${OBJECT_FILES} ${PRINT_HELPERS})
 if(DEFINED LINK_LIBS AND NOT LINK_LIBS STREQUAL "")
     separate_arguments(LIBS_LIST UNIX_COMMAND "${LINK_LIBS}")
     list(APPEND LINK_CMD ${LIBS_LIST})

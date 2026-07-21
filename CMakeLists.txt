@@ -59,22 +59,37 @@ foreach(test_file ${TEST_FILES})
 endforeach()
 
 # --- Examples ---
-file(GLOB EXAMPLE_FILES "${CMAKE_SOURCE_DIR}/examples/*.cpl")
+# Each subdirectory under examples/ is a separate example target.
+# All .cpl files in a directory are compiled and linked together.
 
-foreach(example_file ${EXAMPLE_FILES})
-    get_filename_component(example_name ${example_file} NAME_WE)
+file(GLOB EXAMPLE_SUBDIRS LIST_DIRECTORIES true "${CMAKE_SOURCE_DIR}/examples/*")
 
+set(ALL_EXAMPLE_TARGETS "")
+
+foreach(example_dir ${EXAMPLE_SUBDIRS})
+    if(NOT IS_DIRECTORY ${example_dir})
+        continue()
+    endif()
+
+    get_filename_component(example_name ${example_dir} NAME)
+    file(GLOB CPL_FILES "${example_dir}/*.cpl")
+
+    if(NOT CPL_FILES)
+        continue()
+    endif()
+
+    # Determine link libs based on directory name
     set(EXTRA_LINK_LIBS "")
-    if(${example_name} MATCHES "^(tcp_server|tcp_client)$")
+    if(${example_name} MATCHES "^(tcp)$")
         set(EXTRA_LINK_LIBS "-L/opt/homebrew/lib -lSDL2 -lSDL2_net")
-    elseif(${example_name} MATCHES "^(sdl_demo|sdl_loop|sdl_bindings|real_tetris)$")
+    elseif(${example_name} MATCHES "^(sdl|tetris)$")
         set(EXTRA_LINK_LIBS "-L/opt/homebrew/lib -lSDL2")
     endif()
 
     add_custom_target(build-${example_name}
         COMMAND ${CMAKE_COMMAND}
             -DCOMPILER=$<TARGET_FILE:clumsyc>
-            -DEXAMPLE_FILE=${example_file}
+            -DEXAMPLE_FILES=${CPL_FILES}
             -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
             -DPRINT_HELPERS=$<TARGET_FILE:print_helpers>
             -DLINK_LIBS=${EXTRA_LINK_LIBS}
@@ -83,15 +98,16 @@ foreach(example_file ${EXAMPLE_FILES})
         DEPENDS clumsyc print_helpers
         COMMENT "Building example: ${example_name}"
     )
+
+    list(APPEND ALL_EXAMPLE_TARGETS build-${example_name})
 endforeach()
 
 add_custom_target(examples
     DEPENDS print_helpers
     COMMENT "Building all examples"
 )
-foreach(example_file ${EXAMPLE_FILES})
-    get_filename_component(example_name ${example_file} NAME_WE)
-    add_dependencies(examples build-${example_name})
+foreach(target ${ALL_EXAMPLE_TARGETS})
+    add_dependencies(examples ${target})
 endforeach()
 
 # --- Clean ---

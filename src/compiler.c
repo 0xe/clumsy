@@ -627,14 +627,14 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
         emit_code(codegen, "    ldr   x%d, [sp, #%d]\n", i, slot);
     }
 
-    // Call the function (keep spill on stack for variadic functions)
+    // Call the function (macOS ABI: _ prefix for all symbols)
     if (func_symbol->type == SYM_C_FUNCTION) {
         char *c_func_name = malloc(strlen(func_symbol->type_info.c_function.c_name) + 2);
         sprintf(c_func_name, "_%s", func_symbol->type_info.c_function.c_name);
         emit_code(codegen, "    bl    %s\n", c_func_name);
         free(c_func_name);
     } else {
-        emit_code(codegen, "    bl    %s\n", op->data.string_value);
+        emit_code(codegen, "    bl    _%s\n", op->data.string_value);
     }
 
     // Deallocate spill space AFTER call (variadic funcs read args from stack)
@@ -1280,8 +1280,8 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
 }
 
 void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNode *fn_node, SymbolTable *symbols) {
-    // Generate function label
-    emit_code(codegen, "%s:\n", func_name);
+    // Generate function label (macOS ABI: _ prefix for all symbols)
+    emit_code(codegen, "_%s:\n", func_name);
     
     // Setup frame
     emit_code(codegen, "    stp   x29, x30, [sp, #-16]!\n");
