@@ -109,7 +109,7 @@
                 (if (= etype EQ) (set over 1))
                 (if (= etype EK)
                   (begin
-                    (let kc (>> ev[3] 32))
+                    (let kc (>> ev[2] 32))
                     (if (= kc KE) (set over 1))
 
                     // Left
@@ -415,7 +415,6 @@
         (set rc[1] (+ WW (<< WH 32)))
         (SDL_RenderFillRect renderer (& rc))
         (SDL_RenderPresent renderer)
-        (SDL_Delay 2000)
         (SDL_DestroyRenderer renderer)
         (SDL_DestroyWindow window)
         (SDL_Quit)
