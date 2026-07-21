@@ -118,3 +118,16 @@ proper IR pipeline: **AST → IR → CFG → DFA → SSA → scalar opts → bac
 ### Lower Priority
 
 - [ ] **String operations** — concatenation, comparison, length. (Or just use C stdlib.)
+
+---
+
+## Developer Experience
+
+- [ ] **Assembly comments with source** — emit equivalent Clumsy code as comments in the
+  generated `.s` file. Each ARM64 instruction block gets a `//` comment showing the
+  original s-expression. Makes debugging codegen much easier.
+
+- [ ] **Port Speclite benchmarks** — port classic language benchmarks to Clumsy. Covers:
+  fibonacci, ackermann, mandelbrot, nbody, spectralnorm, fannkuch, fasta, k-nucleotide,
+  pidigits, sieve, chameneos-redux, etc. Good stress test for the new IR pipeline and
+  a baseline for comparing codegen quality against C.
