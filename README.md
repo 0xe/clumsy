@@ -1,156 +1,201 @@
-A language that's statically typed and compiles to native code.
+# Clumsy
 
-- basic types: string, int, characters, arrays, pointers
-- compound types: structs 
-- branching: loops, decisions, functions
-- std library: print, clock, ...
-- call any c/asm function: c-interop
+A Lisp-style language that compiles to ARM64 assembly (macOS, Apple Silicon).
 
-## Syntax
+## Quick Start
 
-```
-// variable initialization with optional initializer
-(let shouldPrint bool)
-(let age int 123)
-(let welcome str "hello world\n")
-(let initial char #\q)
-(let greeting (* str) (& welcome))
+```bash
+# Build the compiler
+cmake -B build && cmake --build build
 
-// arrays
-(let firstNaturalNumbers int[4] [1 2 3 4])
-firstNaturalNumbers[2]
+# Compile and run a program
+./build/clumsyc hello.cpl > hello.s
+as -o hello.o hello.s
+cc -o hello hello.o -L./build -lprint_helpers
+./hello
 
-// structs
-// TODO: (struct amoundAndInitial...)
-(let amountAndInitial struct 
-    #((amount int 356)
-      (initial char #\c)))
+# Run all tests
+ctest --test-dir build
 
-// variable mutation
-(set initial #\r)
-(let getA 
-    (fn () 
-        char
-        (begin
-            // ...
-            (ret #\s))))
-(set initial (getA))
-
-// nested structures
-(let nestedInitial struct
-  #((amI amountAndInitial (789 #\e))))
-  
-// functions
-// TODO: (fn functionExample ...)
-(let functionExample 
-    (fn
-        [(p1 int)
-         (p2 str)
-         (p3 int[10])]
-        int
-        (begin
-            (print "computing: %s" p2) // only builtin for now
-            (ret (* p1 p3[4])))))
-      
-// C-interop - TODO
-// (let puts 
-//    (fn
-//      [(in str)]
-//    void)) // no body, just a declaration
-    
-// FUNCTION CALL
-(functionExample 12 "hello" [1 3 5 7 9 11 13 15 17 19])
-
-// CONDITION
-(if (= age 123)
-  // do something
-  (print age)
-
-  // do something else
-  (print 123))
-
-// LOOP
-(while (<= age 142)
-  (set age (+ age 1))
-  // do something
-  )
-
-// PROPERTY access from structs
-(let something amountAndInitial #(211 #\f))
-something.amount
-something.initial
+# Build all examples
+cmake --build build --target examples
 ```
 
-## Implementations
+## Language
 
-- Compiler for armv8
+S-expression syntax. Every statement is a parenthesised form.
 
-## PROGRESS
+### Variables
 
-  | Feature                 | Compiler (ARM64) | Compiler (x86) |
-  |-------------------------|------------------|----------------|
-  | Basic Variables         | ✅                |                |
-  | Arithmetic (+,-,\*,/)   | ✅                |                |
-  | Modulo (%)              | ✅                |                |
-  | Exponentiation (**)     | ✅                |                |
-  | Comparisons             | ✅                |                |
-  | Arrays                  | ✅                |                |
-  | Control Flow (if/while) | ✅                |                |
-  | Print Statements        | ✅                |                |
-  | Function Definitions    | ✅                |                |
-  | Function Calls          | ✅                |                |
-  | Structs                 | ✅                |                |
-  | Property Access (.)     | ✅                |                |
-  | C-Interop               | ✅                |                |
+```clumsy
+(let x int 42)
+(let msg str "hello")
+(set x 99)
+```
 
+### Arithmetic & Comparison
 
-## TODO
+```clumsy
+(+ x 1)   (- a b)   (* x y)   (/ n 2)   (% n 2)
+(< a b)   (> a b)   (<= a b)  (>= a b)  (= a b)
+(not (= a b))
+```
 
-### bugs
+### Bitwise Operations
 
-- simplify struct and function declaration syntax
+```clumsy
+(& flags 0xFF)    // AND
+(| flags 0x10)    // OR
+(>> x 3)          // right shift
+(<< x 2)          // left shift
+(~ flags)          // bitwise NOT
+```
 
-### features
-- null type, void type
-- ffi with C
-- bitfields & operators
+### Control Flow
 
-### misc
-- sample programs
-- data structure libraries
-- modules? - compile each file to .o and link separately for now?
+```clumsy
+(if condition
+  then-expr
+  else-expr)
 
-### targets
-- compile to QBE, LLVM, x86-64 and RISC-V
-- ast-walking & bytecode interpreter + stack machine
+(while condition
+  (begin
+    stmt1
+    stmt2))
+```
 
-### optimizations
-- optimization passes from CS6120 for the compiler
+### Functions
 
-### syntax
-- different syntaxes (specify as JSON, imperative?)
+```clumsy
+(let add (fn [(a int) (b int)] int
+  (+ a b)))
 
-## Security & Production Readiness
-- Add file size limits to prevent potential overflow on very large source files
-- Enhanced input validation for source file content structure
-- Sanitize error messages to prevent format string vulnerabilities with user-controlled filenames
-- Add comprehensive error handling for edge cases in tokenizer escape sequence processing
-- Implement maximum parsing depth limits to prevent stack overflow on deeply nested expressions
+(add 3 4)
+(ret value)   // early return from any position
+```
 
-## BUGS
+### Pointers
 
-## TODO
+```clumsy
+(let p *int &x)   // address-of
+(* ptr)            // dereference
+```
 
-- refactor for understandability
+### Arrays
 
-I hope to use this as a vehicle to
+```clumsy
+(let arr int[5] [10 20 30 40 50])
+arr[2]             // read element
+(set arr[1] 99)    // write element
+```
 
-- build a new IR
-- CFG / DFA on the IR (allen / killdall)
-- SSA (braun)
-- maybe a few scalar optimizations
+### Structs
 
-and then, two/three backends:
+```clumsy
+(let point struct
+  #((x int 0)
+    (y int 0)))
 
-- compile to LLVM IR / qbe
-- compile to armv8/macos with custom codegen
+(. point x)        // field access
+(set (. point y) 10)
+```
+
+### C Interop
+
+Declare external C functions, then call them normally. macOS ABI: `_`-prefix is added automatically.
+
+```clumsy
+(extern puts [*char] int)
+(extern SDL_Init [int] int)
+
+(puts "hello")
+(SDL_Init 0x20)
+```
+
+### Multi-File Programs
+
+Each `.cpl` file compiles to a `.o`. Link them together:
+
+```clumsy
+// board.cpl
+(let init-board (fn [...] int
+  (begin ...)))
+
+// main.cpl
+(extern init-board [...] int)
+(init-board)
+```
+
+```bash
+./build/clumsyc board.cpl > board.s
+./build/clumsyc main.cpl > main.s
+as -o board.o board.s
+as -o main.o main.s
+cc -o game board.o main.o -L./build -lprint_helpers
+```
+
+## Examples
+
+Example programs live in `examples/`. Build all with:
+
+```bash
+cmake --build build --target examples
+```
+
+| Example | Description |
+|---------|-------------|
+| `tetris/` | Full Tetris game using SDL2 |
+| `sdl/` | SDL2 window and renderer demo |
+| `tcp/` | TCP client/server using SDL2_net |
+| `c_interop/` | Demonstrates C function calls |
+
+## Tests
+
+Regression tests live in `tests/` as `.cpl` + `.expected` pairs. Run via CMake:
+
+```bash
+cmake --build build && ctest --test-dir build
+```
+
+## Build Targets
+
+| Target | Description |
+|--------|-------------|
+| `clumsyc` | The compiler binary |
+| `print_helpers` | Static library for `print_int`/`print_str`/`print_char` |
+| `examples` | Build all example programs |
+| `test-*` | Individual test (auto-discovered from `tests/*.cpl`) |
+
+## Status
+
+| Feature | Status |
+|---------|--------|
+| Variables (int, str, char) | Done |
+| Arithmetic (+, -, \*, /, %, \*\*) | Done |
+| Comparisons (=, <, >, <=, >=) | Done |
+| Bitwise (&, \|, >>, <<, ~) | Done |
+| Logical not | Done |
+| Negative integer literals | Done |
+| Arrays (static, element access, assignment) | Done |
+| Structs (field access, nested) | Done |
+| Pointers (\*, &, deref) | Done |
+| Control flow (if, while) | Done |
+| Functions (definition, calls, return) | Done |
+| C interop (extern declarations) | Done |
+| SDL2 bindings (events, rendering) | Done |
+| Multi-file compilation & linking | Done |
+| Lexical scoping (nested symbol tables) | Done |
+| String literals (interned in .data) | Done |
+| Float/double | Not yet |
+| Type checking | Not yet |
+| IR → SSA pipeline | Planned |
+| QBE / LLVM backends | Planned |
+
+## Roadmap
+
+See `docs/TODO.md` for the full plan. Key upcoming work:
+
+1. **IR pipeline** — AST → IR → CFG → SSA → scalar optimizations
+2. **Float/double support** — FP registers, ARM64 FP instructions
+3. **Type checking pass** — separate validation pass before codegen
+4. **QBE/LLVM backends** — portability beyond ARM64/macOS
