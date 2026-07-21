@@ -584,58 +584,46 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
 
     emit_code(codegen, "    // Function call: %s\n", op->data.string_value);
 
-    emit_push_call_frame(codegen);
-
     int arg_count = expr->data.list.count - 1;
     if (arg_count < 0) arg_count = 0;
 
-    // Spill layout (Darwin ARM64 variadic ABI):
-    // [sp, #0] = arg1, [sp, #8] = arg2, ... [sp, (N-2)*8] = argN-1  (overflow area for variadic)
-    // [sp, (N-1)*8] = arg0  (named arg, NOT in overflow area)
-    // This ensures va_start's __stack points to the first variadic arg.
-    int spill_size = arg_count * 8;
-    if (spill_size % 16 != 0) spill_size += 16 - (spill_size % 16);
-    if (spill_size > 0) {
-        emit_code(codegen, "    sub   sp, sp, #%d\n", spill_size);
-        codegen->sp_displacement += spill_size;
-    }
-
-    for (int i = 0; i < arg_count; i++) {
+    // Evaluate all args into temporary registers (x10..x17) to avoid clobbering.
+    // Then move them into x0..x7 right before the call.
+    for (int i = 0; i < arg_count && i < 8; i++) {
         ASTNode *arg = expr->data.list.children[i + 1];
-        // arg0 goes to slot (N-1), arg_i (i>0) goes to slot (i-1)
-        int slot = (i == 0 && arg_count > 1) ? (arg_count - 1) * 8 : (i > 0 ? (i - 1) * 8 : 0);
+        const char *tmp = (i < 8) ? (char[]){'x', '0' + (char)i, '0' + (char)0, '\0'} : "x9";
+        // Use x10-x17 as scratch to avoid clobbering during evaluation
+        const char *scratch = "x9";
 
         if (arg->type == AST_INT) {
-            emit_mov_immediate(codegen, "x0", arg->data.int_value);
-            emit_code(codegen, "    str   x0, [sp, #%d]\n", slot);
+            emit_mov_immediate(codegen, scratch, arg->data.int_value);
         } else if (arg->type == AST_IDENTIFIER) {
             Symbol *arg_sym = find_symbol(symbols, arg->data.string_value);
             if (arg_sym && (arg_sym->type == SYM_STRUCT || arg_sym->type == SYM_ARRAY)) {
                 int off = get_symbol_offset(symbols, arg->data.string_value);
-                emit_code(codegen, "    mov   x9, sp\n");
-                emit_code(codegen, "    add   x9, x9, #%d\n", off + codegen->sp_displacement - spill_size);
-                emit_code(codegen, "    str   x9, [sp, #%d]\n", slot);
+                emit_code(codegen, "    mov   %s, sp\n", scratch);
+                emit_code(codegen, "    add   %s, %s, #%d\n", scratch, scratch, off + codegen->sp_displacement);
             } else {
-                emit_load_variable(codegen, "x0", arg->data.string_value, symbols);
-                emit_code(codegen, "    str   x0, [sp, #%d]\n", slot);
+                emit_load_variable(codegen, scratch, arg->data.string_value, symbols);
             }
         } else if (arg->type == AST_STRING) {
             size_t string_index = intern_string(codegen, arg->data.string_value);
-            emit_code(codegen, "    adrp   x0, str_%zu@PAGE\n", string_index);
-            emit_code(codegen, "    add    x0, x0, str_%zu@PAGEOFF\n", string_index);
-            emit_code(codegen, "    str   x0, [sp, #%d]\n", slot);
+            emit_code(codegen, "    adrp   %s, str_%zu@PAGE\n", scratch, string_index);
+            emit_code(codegen, "    add    %s, %s, str_%zu@PAGEOFF\n", scratch, scratch, string_index);
         } else if (arg->type == AST_LIST) {
             generate_expression(codegen, arg, symbols);
-            emit_code(codegen, "    str   x0, [sp, #%d]\n", slot);
+            emit_code(codegen, "    mov   %s, x0\n", scratch);
         }
+        // Spill to stack so we don't clobber during later evals
+        int spill_offset = i * 8;
+        emit_code(codegen, "    str   %s, [sp, #-16]!\n", scratch);
+        codegen->sp_displacement += 16;
     }
 
-    // Load from spill slots into argument registers
-    // x0 gets arg0 (at slot N-1 if multi-arg, slot 0 if single-arg)
-    // x1..x7 get args 1..7 (at slots 0..6)
-    for (int i = 0; i < arg_count && i < 8; i++) {
-        int slot = (i == 0 && arg_count > 1) ? (arg_count - 1) * 8 : (i > 0 ? (i - 1) * 8 : 0);
-        emit_code(codegen, "    ldr   x%d, [sp, #%d]\n", i, slot);
+    // Pop spilled args back into x0..x7 (reverse order)
+    for (int i = arg_count - 1; i >= 0 && i < 8; i--) {
+        emit_code(codegen, "    ldr   x%d, [sp], #16\n", i);
+        codegen->sp_displacement -= 16;
     }
 
     // Call the function (macOS ABI: _ prefix for all symbols)
@@ -647,14 +635,6 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
     } else {
         emit_code(codegen, "    bl    _%s\n", op->data.string_value);
     }
-
-    // Deallocate spill space AFTER call (variadic funcs read args from stack)
-    if (spill_size > 0) {
-        codegen->sp_displacement -= spill_size;
-        emit_code(codegen, "    add   sp, sp, #%d\n", spill_size);
-    }
-
-    emit_pop_call_frame(codegen);
 }
 
 void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) {
@@ -1162,21 +1142,42 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
             emit_store_variable(codegen, "x0", name_node->data.string_value, symbols);
         }
     } else if (strcmp(op->data.string_value, "print") == 0) {
-        // Print statement: (print expr)
+        // Print statement: (print expr) — emits printf with appropriate format string
+        // macOS ARM64 variadic ABI: format string (named param) in x0, variadic args on stack at [sp]
         if (stmt->data.list.count >= 2) {
             ASTNode *expr = stmt->data.list.children[1];
-            generate_expression(codegen, expr, symbols);
-            
-            // Call appropriate print helper function
-            // The value is already in x0 (first argument register)
+
+            // Determine format string
+            size_t fmt_index;
             if (expr->type == AST_STRING) {
-                emit_code(codegen, "    bl    _print_str\n");
+                fmt_index = intern_string(codegen, "%s");
             } else if (expr->type == AST_CHAR) {
-                emit_code(codegen, "    bl    _print_char\n");
+                fmt_index = intern_string(codegen, "%c");
             } else {
-                // Default to integer format
-                emit_code(codegen, "    bl    _print_int\n");
+                fmt_index = intern_string(codegen, "%ld");
             }
+
+            // Evaluate expression into x9 (temp)
+            generate_expression(codegen, expr, symbols);
+            emit_code(codegen, "    mov   x9, x0\n");
+
+            // Load format string into x0 (named param)
+            emit_code(codegen, "    adrp  x0, str_%zu@PAGE\n", fmt_index);
+            emit_code(codegen, "    add   x0, x0, str_%zu@PAGEOFF\n", fmt_index);
+
+            // Push call frame, allocate space for variadic arg, store it on stack
+            emit_push_call_frame(codegen);
+            emit_code(codegen, "    sub   sp, sp, #16\n");
+            codegen->sp_displacement += 16;
+            emit_code(codegen, "    str   x9, [sp]\n");
+
+            // Call printf
+            emit_code(codegen, "    bl    _printf\n");
+
+            // Restore stack
+            emit_code(codegen, "    add   sp, sp, #16\n");
+            codegen->sp_displacement -= 16;
+            emit_pop_call_frame(codegen);
         }
     } else if (strcmp(op->data.string_value, "if") == 0) {
         // If statement: (if condition then-branch [else-branch])

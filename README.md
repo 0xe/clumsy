@@ -11,7 +11,7 @@ cmake -B build && cmake --build build
 # Compile and run a program
 ./build/clumsyc hello.cpl > hello.s
 as -o hello.o hello.s
-cc -o hello hello.o -L./build -lprint_helpers
+cc -o hello hello.o
 ./hello
 
 # Run all tests
@@ -23,7 +23,7 @@ cmake --build build --target examples
 
 ## Language
 
-S-expression syntax. Every statement is a parenthesised form.
+S-expression syntax.
 
 ### Variables
 
@@ -102,7 +102,7 @@ arr[2]             // read element
 
 ### C Interop
 
-Declare external C functions, then call them normally. macOS ABI: `_`-prefix is added automatically.
+Declare external C functions, then call them normally.
 
 ```clumsy
 (extern puts [*char] int)
@@ -131,7 +131,7 @@ Each `.cpl` file compiles to a `.o`. Link them together:
 ./build/clumsyc main.cpl > main.s
 as -o board.o board.s
 as -o main.o main.s
-cc -o game board.o main.o -L./build -lprint_helpers
+cc -o game board.o main.o
 ```
 
 ## Examples
@@ -162,7 +162,6 @@ cmake --build build && ctest --test-dir build
 | Target | Description |
 |--------|-------------|
 | `clumsyc` | The compiler binary |
-| `print_helpers` | Static library for `print_int`/`print_str`/`print_char` |
 | `examples` | Build all example programs |
 | `test-*` | Individual test (auto-discovered from `tests/*.cpl`) |
 

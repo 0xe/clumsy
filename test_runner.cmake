@@ -5,7 +5,6 @@
 #   TEST_FILE      path to .cpl test source
 #   TMP_DIR        temp directory for intermediate files
 #   TEST_DIR       path to tests/ (for .expected files)
-#   PRINT_HELPERS  path to print_helpers.o
 
 get_filename_component(TEST_NAME ${TEST_FILE} NAME_WE)
 
@@ -20,9 +19,9 @@ if(NOT COMPILE_RC EQUAL 0)
     message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
 endif()
 
-# Link
+# Link (no extra libraries needed — printf is in libc)
 execute_process(
-    COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.s ${PRINT_HELPERS}
+    COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.s
     ERROR_VARIABLE LINK_ERR
     RESULT_VARIABLE LINK_RC
 )

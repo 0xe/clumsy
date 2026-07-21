@@ -7,7 +7,6 @@ A Lisp-style language that compiles to ARM64 assembly (macOS, Apple Silicon).
 ```bash
 cmake -B build && cmake --build build
 # binary: ./build/clumsyc
-# library: ./build/libprint_helpers.a (for linking generated programs)
 ```
 
 ## Usage

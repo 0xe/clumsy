@@ -29,12 +29,6 @@ set_target_properties(clumsyc PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
 )
 
-# --- Print helpers (linked into generated programs, not the compiler) ---
-add_library(print_helpers STATIC src/print_helpers.c)
-set_target_properties(print_helpers PROPERTIES
-    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}
-)
-
 # --- Tests ---
 enable_testing()
 
@@ -51,11 +45,10 @@ foreach(test_file ${TEST_FILES})
             -DTEST_FILE=${test_file}
             -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
             -DTEST_DIR=${CMAKE_SOURCE_DIR}/tests
-            -DPRINT_HELPERS=$<TARGET_FILE:print_helpers>
             -P ${CMAKE_SOURCE_DIR}/test_runner.cmake
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )
-    set_tests_properties(${test_name} PROPERTIES DEPENDS "clumsyc;print_helpers")
+    set_tests_properties(${test_name} PROPERTIES DEPENDS "clumsyc")
 endforeach()
 
 # --- Examples ---
@@ -91,11 +84,10 @@ foreach(example_dir ${EXAMPLE_SUBDIRS})
             -DCOMPILER=$<TARGET_FILE:clumsyc>
             -DEXAMPLE_FILES=${CPL_FILES}
             -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
-            -DPRINT_HELPERS=$<TARGET_FILE:print_helpers>
             -DLINK_LIBS=${EXTRA_LINK_LIBS}
             -P ${CMAKE_SOURCE_DIR}/example_runner.cmake
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        DEPENDS clumsyc print_helpers
+        DEPENDS clumsyc
         COMMENT "Building example: ${example_name}"
     )
 
@@ -103,7 +95,6 @@ foreach(example_dir ${EXAMPLE_SUBDIRS})
 endforeach()
 
 add_custom_target(examples
-    DEPENDS print_helpers
     COMMENT "Building all examples"
 )
 foreach(target ${ALL_EXAMPLE_TARGETS})

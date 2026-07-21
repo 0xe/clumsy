@@ -4,7 +4,6 @@
 #   COMPILER       path to clumsyc
 #   EXAMPLE_FILES  space-separated list of .cpl source files (or single file for backward compat)
 #   TMP_DIR        temp directory for intermediate files
-#   PRINT_HELPERS  path to print_helpers.o
 #
 # Optional variables:
 #   LINK_LIBS      extra link libraries (e.g. "-lSDL2")
@@ -41,8 +40,8 @@ foreach(example_file ${EXAMPLE_FILES})
     list(APPEND OBJECT_FILES ${TMP_DIR}/${file_name}.o)
 endforeach()
 
-# Link
-set(LINK_CMD clang -o ${TMP_DIR}/${EXAMPLE_NAME}.x ${OBJECT_FILES} ${PRINT_HELPERS})
+# Link (printf is in libc, no extra libs needed for print)
+set(LINK_CMD clang -o ${TMP_DIR}/${EXAMPLE_NAME}.x ${OBJECT_FILES})
 if(DEFINED LINK_LIBS AND NOT LINK_LIBS STREQUAL "")
     separate_arguments(LIBS_LIST UNIX_COMMAND "${LINK_LIBS}")
     list(APPEND LINK_CMD ${LIBS_LIST})
