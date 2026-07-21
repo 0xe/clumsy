@@ -123,17 +123,13 @@ proper IR pipeline: **AST → IR → CFG → DFA → SSA → scalar opts → bac
 
 ## Cleanup
 
-- [ ] **`SYM_STR` / `SYM_POINTER` overlap** — `str` and `*char` are the same thing but
-  tracked as different symbol types. Unify.
-
-- [ ] **Hardcoded struct/array sizes in arg passing** — `"// assuming 2 fields for now"` and
-  `"// assuming 4 elements for now"` in the function call argument loop.
-
-- [ ] **String arg handling copy-pasted** — `AST_STRING` in argument lists is handled with
-  the same `strdup`/capacity-check block in at least two places.
-
-- [ ] **Ret value paths** — verify `ret` works correctly in all control flow positions
-  (nested if/while, end of function, etc.).
+- [x] **Hardcoded struct stack sizes** — `symbol_stack_size()` now looks up actual field count
+  from `global_struct_types` instead of hardcoded 16 bytes.
+- [x] **String arg handling copy-pasted** — Extracted into `intern_string()` helper, used
+  by both `generate_call()` and `generate_expression()`.
+- [x] **`ret` only worked as last statement** — Now generates `b epilogue` jump to function
+  exit. Works in `if` branches, `while` loops, and mid-block positions. Fixed for both
+  `_main` and user-defined functions.
 
 ---
 

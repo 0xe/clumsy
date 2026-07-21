@@ -1,0 +1,37 @@
+(let early_exit (fn [(x int)] int
+  (begin
+    (if (= x 0)
+      (ret 42)
+      (ret 99))
+    (print 999))))
+
+(let loop_ret (fn [(n int)] int
+  (begin
+    (while (> n 0)
+      (begin
+        (if (= n 3) (ret 30))
+        (set n (- n 1))))
+    (ret (- 0 1)))))
+
+(let mid_ret (fn [(x int)] int
+  (begin
+    (print 1)
+    (ret x)
+    (print 2))))
+
+(let multi_ret (fn [(x int)] int
+  (begin
+    (if (< x 0)
+      (ret (- 0 x))
+      (if (= x 0)
+        (ret 0)
+        (ret x))))))
+
+(print (early_exit 0))
+(print (early_exit 5))
+(print (loop_ret 5))
+(print (loop_ret 3))
+(print (mid_ret 77))
+(print (multi_ret (- 0 5)))
+(print (multi_ret 0))
+(print (multi_ret 10))

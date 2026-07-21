@@ -27,6 +27,7 @@ CodeGen *create_codegen(void) {
     codegen->sp_displacement = 0;
     codegen->scratch_offset = 0;
     codegen->scratch_depth = 0;
+    codegen->current_epilogue_label = NULL;
     
     return codegen;
 }
@@ -276,7 +277,13 @@ static int symbol_stack_size(Symbol *sym) {
         if (size <= 0) size = 4;
         return size * 8;
     }
-    if (sym->type == SYM_STRUCT) return 16;
+    if (sym->type == SYM_STRUCT) {
+        if (global_struct_types && sym->type_info.struct_instance.struct_type_name) {
+            StructType *st = find_struct_type(global_struct_types, sym->type_info.struct_instance.struct_type_name);
+            if (st) return st->count * 8;
+        }
+        return 16; // fallback
+    }
     return 8;
 }
 
@@ -550,6 +557,24 @@ void emit_arithmetic(CodeGen *codegen, const char *op, const char *dest, const c
     }
 }
 
+size_t intern_string(CodeGen *codegen, const char *raw_value) {
+    size_t string_index = codegen->string_count;
+    size_t str_len = strlen(raw_value);
+    char *unquoted = malloc(str_len + 1);
+    if (str_len >= 2 && raw_value[0] == '"' && raw_value[str_len - 1] == '"') {
+        strncpy(unquoted, raw_value + 1, str_len - 2);
+        unquoted[str_len - 2] = '\0';
+    } else {
+        strcpy(unquoted, raw_value);
+    }
+    if (codegen->string_count >= codegen->string_capacity) {
+        codegen->string_capacity = codegen->string_capacity == 0 ? 16 : codegen->string_capacity * 2;
+        codegen->strings = realloc(codegen->strings, codegen->string_capacity * sizeof(char *));
+    }
+    codegen->strings[codegen->string_count++] = unquoted;
+    return string_index;
+}
+
 void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTable *symbols) {
     Symbol *func_symbol = find_symbol_recursive(symbols, op->data.string_value);
     if (!func_symbol || (func_symbol->type != SYM_FUNCTION && func_symbol->type != SYM_C_FUNCTION)) {
@@ -595,21 +620,7 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
                 emit_code(codegen, "    str   x0, [sp, #%d]\n", slot);
             }
         } else if (arg->type == AST_STRING) {
-            size_t string_index = codegen->string_count;
-            char *str_value = arg->data.string_value;
-            size_t str_len = strlen(str_value);
-            char *unquoted = malloc(str_len + 1);
-            if (str_len >= 2 && str_value[0] == '"' && str_value[str_len - 1] == '"') {
-                strncpy(unquoted, str_value + 1, str_len - 2);
-                unquoted[str_len - 2] = '\0';
-            } else {
-                strcpy(unquoted, str_value);
-            }
-            if (codegen->string_count >= codegen->string_capacity) {
-                codegen->string_capacity = codegen->string_capacity == 0 ? 16 : codegen->string_capacity * 2;
-                codegen->strings = realloc(codegen->strings, codegen->string_capacity * sizeof(char *));
-            }
-            codegen->strings[codegen->string_count++] = unquoted;
+            size_t string_index = intern_string(codegen, arg->data.string_value);
             emit_code(codegen, "    adrp   x0, str_%zu@PAGE\n", string_index);
             emit_code(codegen, "    add    x0, x0, str_%zu@PAGEOFF\n", string_index);
             emit_code(codegen, "    str   x0, [sp, #%d]\n", slot);
@@ -659,21 +670,7 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
             break;
 
         case AST_STRING: {
-            size_t string_index = codegen->string_count;
-            char *str_value = expr->data.string_value;
-            size_t str_len = strlen(str_value);
-            char *unquoted = malloc(str_len + 1);
-            if (str_value[0] == '"' && str_value[str_len - 1] == '"') {
-                strncpy(unquoted, str_value + 1, str_len - 2);
-                unquoted[str_len - 2] = '\0';
-            } else {
-                strcpy(unquoted, str_value);
-            }
-            if (codegen->string_count >= codegen->string_capacity) {
-                codegen->string_capacity = codegen->string_capacity == 0 ? 16 : codegen->string_capacity * 2;
-                codegen->strings = realloc(codegen->strings, codegen->string_capacity * sizeof(char *));
-            }
-            codegen->strings[codegen->string_count++] = unquoted;
+            size_t string_index = intern_string(codegen, expr->data.string_value);
             emit_code(codegen, "    adrp   x9, str_%zu@PAGE\n", string_index);
             emit_code(codegen, "    add    x9, x9, str_%zu@PAGEOFF\n", string_index);
             emit_code(codegen, "    mov    x0, x9\n");
@@ -1255,11 +1252,12 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
         if (stmt->data.list.count >= 2) {
             ASTNode *expr = stmt->data.list.children[1];
             generate_expression(codegen, expr, symbols);
-            // Don't emit ret here - let function epilogue handle it
         } else {
             // Return void
             emit_mov_immediate(codegen, "x0", 0);
-            // Don't emit ret here - let function epilogue handle it
+        }
+        if (codegen->current_epilogue_label) {
+            emit_code(codegen, "    b     %s\n", codegen->current_epilogue_label);
         }
     } else {
         // Check if this is a function call
@@ -1440,12 +1438,21 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
         }
     
     // Generate function body with function-local symbols
+    char *epilogue_label = new_label(codegen, "epilogue");
+    char *prev_epilogue = codegen->current_epilogue_label;
+    codegen->current_epilogue_label = epilogue_label;
+    
     if (fn_node->type == AST_FN && fn_node->data.fn.body) {
         generate_statement(codegen, fn_node->data.fn.body, func_symbols);
     } else {
         // No body, return 0
         emit_mov_immediate(codegen, "x0", 0);
     }
+    
+    codegen->current_epilogue_label = prev_epilogue;
+    
+    // Emit epilogue label (jump target for ret)
+    emit_code(codegen, "%s:\n", epilogue_label);
     
     // Cleanup stack space (including nested scopes)
     {
@@ -1512,6 +1519,11 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
         }
     }
     
+    // Set up epilogue label for ret statements
+    char *epilogue_label = new_label(codegen, "epilogue");
+    char *prev_epilogue = codegen->current_epilogue_label;
+    codegen->current_epilogue_label = epilogue_label;
+    
 // Generate code for each statement (skip function definitions)
     // Also find the final expression to use as exit code
     ASTNode *final_expr = NULL;
@@ -1556,12 +1568,18 @@ void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols
         }
     }
     
+    codegen->current_epilogue_label = prev_epilogue;
+    
     // Set exit code based on final expression or default to 0
+    // This must be BEFORE the epilogue label so ret skips it
     if (final_expr) {
         generate_expression(codegen, final_expr, symbols);
     } else {
         emit_mov_immediate(codegen, "x0", 0);
     }
+    
+    // Emit epilogue label (jump target for ret)
+    emit_code(codegen, "%s:\n", epilogue_label);
     
     // Deallocate stack space
     if (stack_space > 0) {

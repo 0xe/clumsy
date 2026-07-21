@@ -15,6 +15,7 @@ typedef struct {
     int sp_displacement;  // tracks transient sp movement from call frame push/pop
     int scratch_offset;   // stack offset for binary expression scratch slots (beyond all local vars)
     int scratch_depth;    // nesting depth for scratch slot allocation
+    char *current_epilogue_label;  // label for current function's epilogue (used by ret)
 } CodeGen;
 
 // Compiler functions
@@ -50,5 +51,8 @@ void emit_store_variable(CodeGen *codegen, const char *reg, const char *var_name
 void emit_arithmetic(CodeGen *codegen, const char *op, const char *dest, const char *src1, const char *src2);
 void emit_push_call_frame(CodeGen *codegen);
 void emit_pop_call_frame(CodeGen *codegen);
+
+// String literal interning
+size_t intern_string(CodeGen *codegen, const char *raw_value);
 
 #endif // COMPILER_H
