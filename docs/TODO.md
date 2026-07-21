@@ -118,28 +118,3 @@ proper IR pipeline: **AST → IR → CFG → DFA → SSA → scalar opts → bac
 ### Lower Priority
 
 - [ ] **String operations** — concatenation, comparison, length. (Or just use C stdlib.)
-
----
-
-## Cleanup
-
-- [x] **Hardcoded struct stack sizes** — `symbol_stack_size()` now looks up actual field count
-  from `global_struct_types` instead of hardcoded 16 bytes.
-- [x] **String arg handling copy-pasted** — Extracted into `intern_string()` helper, used
-  by both `generate_call()` and `generate_expression()`.
-- [x] **`ret` only worked as last statement** — Now generates `b epilogue` jump to function
-  exit. Works in `if` branches, `while` loops, and mid-block positions. Fixed for both
-  `_main` and user-defined functions.
-
----
-
-## Multi-File Compilation
-
-- [x] **macOS `_` prefix for Clumsy functions** — labels and calls now use `_` prefix
-  for ABI compliance. Cross-file linking works.
-
-- [x] **Directory-based examples** — `examples/<name>/` directories with multiple `.cpl`
-  files are compiled and linked together.
-
-- [x] **extern declarations for Clumsy functions** — use `(extern func-name [args] ret)`
-  to reference functions from other files.
