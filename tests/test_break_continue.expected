@@ -1,0 +1,9 @@
+=== Break Test ===
+
+break at 5: i = 5
+sum of odd 1..9 = 25
+inner broke at k=5
+inner broke at k=5
+inner broke at k=5
+outer = 3
+=== Done ===

@@ -1,0 +1,43 @@
+(print "=== Prefix Not Test ===\n")
+(print "\n")
+
+(let a int 0)
+(let b int 1)
+
+// !0 = 1 and !1 = 0
+(print "!0 = ")
+(print (! a))
+(print "\n")
+(print "!1 = ")
+(print (! b))
+(print "\n")
+
+// !!x = x for non-zero
+(let x int 42)
+(print "!!42 = ")
+(print (! (! x)))
+(print "\n")
+
+// ! of comparison result
+(let c int (= 5 5))
+(print "!(5=5) = ")
+(print (! c))
+(print "\n")
+
+(let d int (< 3 5))
+(print "!(3<5) = ")
+(print (! d))
+(print "\n")
+
+// Combined with && and ||
+(let e int (|| (! 0) 0))
+(print "(!0) || 0 = ")
+(print e)
+(print "\n")
+
+(let f int (&& (! 1) 5))
+(print "(!1) && 5 = ")
+(print f)
+(print "\n")
+
+(print "=== Done ===\n")

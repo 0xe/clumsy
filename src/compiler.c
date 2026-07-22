@@ -28,6 +28,7 @@ CodeGen *create_codegen(void) {
     codegen->scratch_offset = 0;
     codegen->scratch_depth = 0;
     codegen->current_epilogue_label = NULL;
+    codegen->loop_depth = 0;
     
     return codegen;
 }
@@ -666,8 +667,61 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                 ASTNode *op = expr->data.list.children[0];
                 
                 if (op->type == AST_IDENTIFIER) {
+                    // Handle logical OR: (|| a b) — short-circuit
+                    if (strcmp(op->data.string_value, "||") == 0 && expr->data.list.count == 3) {
+                        ASTNode *left = expr->data.list.children[1];
+                        ASTNode *right = expr->data.list.children[2];
+                        char *true_label = new_label(codegen, "or_true");
+                        char *end_label = new_label(codegen, "or_end");
+
+                        generate_expression(codegen, left, symbols);
+                        emit_code(codegen, "    cbnz   x0, %s\n", true_label);
+
+                        generate_expression(codegen, right, symbols);
+                        emit_code(codegen, "    cbnz   x0, %s\n", true_label);
+
+                        emit_mov_immediate(codegen, "x0", 0);
+                        emit_code(codegen, "    b     %s\n", end_label);
+
+                        emit_code(codegen, "%s:\n", true_label);
+                        emit_mov_immediate(codegen, "x0", 1);
+                        emit_code(codegen, "%s:\n", end_label);
+
+                        free(true_label);
+                        free(end_label);
+                    }
+                    // Handle logical AND: (&& a b) — short-circuit
+                    else if (strcmp(op->data.string_value, "&&") == 0 && expr->data.list.count == 3) {
+                        ASTNode *left = expr->data.list.children[1];
+                        ASTNode *right = expr->data.list.children[2];
+                        char *false_label = new_label(codegen, "and_false");
+                        char *end_label = new_label(codegen, "and_end");
+
+                        generate_expression(codegen, left, symbols);
+                        emit_code(codegen, "    cbz    x0, %s\n", false_label);
+
+                        generate_expression(codegen, right, symbols);
+                        emit_code(codegen, "    cbz    x0, %s\n", false_label);
+
+                        emit_mov_immediate(codegen, "x0", 1);
+                        emit_code(codegen, "    b     %s\n", end_label);
+
+                        emit_code(codegen, "%s:\n", false_label);
+                        emit_mov_immediate(codegen, "x0", 0);
+                        emit_code(codegen, "%s:\n", end_label);
+
+                        free(false_label);
+                        free(end_label);
+                    }
+                    // Handle logical not: (! expr)
+                    else if (strcmp(op->data.string_value, "!") == 0 && expr->data.list.count == 2) {
+                        ASTNode *operand = expr->data.list.children[1];
+                        generate_expression(codegen, operand, symbols);
+                        emit_code(codegen, "    cmp   x0, #0\n");
+                        emit_code(codegen, "    cset  x0, eq\n");
+                    }
                     // Handle arithmetic, comparison, and bitwise operators
-                    if (strcmp(op->data.string_value, "+") == 0 ||
+                    else if (strcmp(op->data.string_value, "+") == 0 ||
                         strcmp(op->data.string_value, "-") == 0 ||
                         strcmp(op->data.string_value, "*") == 0 ||
                         strcmp(op->data.string_value, "/") == 0 ||
@@ -1213,24 +1267,31 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
         if (stmt->data.list.count >= 3) {
             ASTNode *condition = stmt->data.list.children[1];
             ASTNode *body = stmt->data.list.children[2];
-            
+
             char *loop_label = new_label(codegen, "loop");
             char *end_label = new_label(codegen, "end_loop");
-            
+
+            // Push loop context for break/continue
+            codegen->loop_stack[codegen->loop_depth].break_label = end_label;
+            codegen->loop_stack[codegen->loop_depth].continue_label = loop_label;
+            codegen->loop_depth++;
+
             // Loop start
             emit_code(codegen, "%s:\n", loop_label);
-            
+
             // Generate condition
             generate_expression(codegen, condition, symbols);
             emit_code(codegen, "    cbz   x0, %s\n", end_label);
-            
+
             // Generate body
             generate_statement(codegen, body, symbols);
             emit_code(codegen, "    b     %s\n", loop_label);
-            
+
             // Loop end
             emit_code(codegen, "%s:\n", end_label);
-            
+
+            // Pop loop context
+            codegen->loop_depth--;
             free(loop_label);
             free(end_label);
         }
@@ -1247,6 +1308,24 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
         }
         for (size_t i = 1; i < stmt->data.list.count; i++) {
             generate_statement(codegen, stmt->data.list.children[i], child);
+        }
+    } else if (strcmp(op->data.string_value, "break") == 0) {
+        // Break statement: (break) — jump to end of current loop
+        if (codegen->loop_depth > 0) {
+            LoopContext *ctx = &codegen->loop_stack[codegen->loop_depth - 1];
+            emit_code(codegen, "    b     %s\n", ctx->break_label);
+        } else {
+            fprintf(stderr, "error: 'break' outside of loop\n");
+            exit(1);
+        }
+    } else if (strcmp(op->data.string_value, "continue") == 0) {
+        // Continue statement: (continue) — jump back to loop condition
+        if (codegen->loop_depth > 0) {
+            LoopContext *ctx = &codegen->loop_stack[codegen->loop_depth - 1];
+            emit_code(codegen, "    b     %s\n", ctx->continue_label);
+        } else {
+            fprintf(stderr, "error: 'continue' outside of loop\n");
+            exit(1);
         }
     } else if (strcmp(op->data.string_value, "ret") == 0) {
         // Return statement: (ret expr)
@@ -1279,7 +1358,8 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
 }
 
 void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNode *fn_node, SymbolTable *symbols) {
-    // Generate function label (macOS ABI: _ prefix for all symbols)
+    // Generate function label with .globl for cross-file linking (macOS ABI: _ prefix)
+    emit_code(codegen, ".globl _%s\n", func_name);
     emit_code(codegen, "_%s:\n", func_name);
     
     // Setup frame
@@ -1642,7 +1722,28 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *stru
         }
     }
     
-    generate_main_function(codegen, ast, symbols);
+    // Check if file has any top-level executable code (not just function defs / extern decls)
+    bool has_top_level_code = false;
+    if (ast->type == AST_LIST) {
+        for (size_t i = 0; i < ast->data.list.count; i++) {
+            ASTNode *stmt = ast->data.list.children[i];
+            if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
+                ASTNode *op = stmt->data.list.children[0];
+                if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
+                    ASTNode *init_value = (stmt->data.list.count >= 4) ? stmt->data.list.children[3] :
+                                          (stmt->data.list.count == 3) ? stmt->data.list.children[2] : NULL;
+                    if (init_value && init_value->type == AST_FN) continue;
+                }
+            }
+            if (stmt->type == AST_EXTERN_DECL) continue;
+            has_top_level_code = true;
+            break;
+        }
+    }
+
+    if (has_top_level_code) {
+        generate_main_function(codegen, ast, symbols);
+    }
     
     // Emit all collected string literals
     if (codegen->string_count > 0) {

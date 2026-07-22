@@ -43,6 +43,12 @@ S-expression syntax. Every statement is a parenthesised form.
 (+ x 1)   (- a b)   (* x y)   (/ n 2)   (% n 2)
 (< a b)   (> a b)   (<= a b)  (>= a b)  (= a b)
 (not (= a b))
+(! expr)                  // prefix logical not
+(&& a b)                  // logical AND (short-circuit)
+(|| a b)                  // logical OR (short-circuit)
+(& a b)   (| a b)         // bitwise AND, OR
+(>> a 2)  (<< a 2)        // shifts
+(~ x)                     // bitwise NOT
 ```
 
 ### Control flow
@@ -55,6 +61,8 @@ S-expression syntax. Every statement is a parenthesised form.
 (while condition
   (begin
     stmt1
+    (if condition (break))       // exit loop
+    (if other (continue))       // skip to next iteration
     stmt2
   ))
 ```

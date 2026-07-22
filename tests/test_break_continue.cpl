@@ -1,0 +1,48 @@
+(print "=== Break Test ===\n")
+(print "\n")
+
+// break out of while loop
+(let i int 0)
+(while (< i 100)
+  (begin
+    (if (= i 5) (break))
+    (set i (+ i 1))
+  ))
+(print "break at 5: i = ")
+(print i)
+(print "\n")
+
+// continue test
+(let sum int 0)
+(let j int 0)
+(while (< j 10)
+  (begin
+    (set j (+ j 1))
+    (if (= (% j 2) 0) (continue))
+    (set sum (+ sum j))
+  ))
+(print "sum of odd 1..9 = ")
+(print sum)
+(print "\n")
+
+// nested break (breaks inner loop only)
+(let outer int 0)
+(let k int 0)
+(while (< outer 3)
+  (begin
+    (set k 0)
+    (while (< k 100)
+      (begin
+        (if (= k 5) (break))
+        (set k (+ k 1))
+      ))
+    (print "inner broke at k=")
+    (print k)
+    (print "\n")
+    (set outer (+ outer 1))
+  ))
+(print "outer = ")
+(print outer)
+(print "\n")
+
+(print "=== Done ===\n")

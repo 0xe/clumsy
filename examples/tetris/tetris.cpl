@@ -1,4 +1,4 @@
-// Tetris in Clumsy
+// Tetris in Clumsy — refactored with ||, &&, break, continue
 (extern SDL_Init [int] int)
 (extern SDL_CreateWindow [(* char) int int int int int] (* void))
 (extern SDL_CreateRenderer [(* void) int int] (* void))
@@ -71,6 +71,143 @@
 (let _nx int 0)
 (let _ny int 0)
 
+// Helper: check if position is blocked (out of bounds or occupied)
+(let blocked (fn [(x int) (y int)] int
+  (if (|| (< x 0) (|| (>= x COLS) (|| (< y 0) (>= y ROWS))))
+    (ret 1)
+    (if (> board[(+ (* y COLS) x)] 0) (ret 1) (ret 0)))))
+
+// Helper: check if position is in bounds
+(let in_bounds (fn [(x int) (y int)] int
+  (ret (&& (&& (>= x 0) (< x COLS)) (&& (>= y 0) (< y ROWS))))))
+
+// Helper: move piece by dx, dy if not blocked
+(let try_move (fn [(dx int) (dy int)] int
+  (set _ok 1)
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (set _nx (+ cx[_i] dx))
+      (set _ny (+ cy[_i] dy))
+      (if (blocked _nx _ny) (set _ok 0))
+      (set _i (+ _i 1))
+    ))
+  (if (= _ok 0) (ret 0))
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (set cx[_i] (+ cx[_i] dx))
+      (set cy[_i] (+ cy[_i] dy))
+      (set _i (+ _i 1))
+    ))
+  (set ppx (+ ppx dx))
+  (set ppy (+ ppy dy))
+  (ret 1)))
+
+// Helper: update cell positions from ppx/ppy and shape data
+(let update_cells (fn [] void
+  (set base (+ (* pk 32) (* pr 8)))
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (set cx[_i] (+ ppx SH[(+ base (* _i 2))]))
+      (set cy[_i] (+ ppy SH[(+ base (+ (* _i 2) 1))]))
+      (set _i (+ _i 1))
+    ))))
+
+// Helper: spawn new piece
+(let spawn (fn [] void
+  (set pk (% (+ score timer) 7))
+  (set pr 0)
+  (set ppx 3)
+  (set ppy 0)
+  (update_cells)))
+
+// Helper: lock piece to board
+(let lock (fn [] void
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (if (in_bounds cx[_i] cy[_i])
+        (set board[(+ (* cy[_i] COLS) cx[_i])] (+ pk 1)))
+      (set _i (+ _i 1))
+    ))))
+
+// Helper: clear completed lines, return number cleared
+(let clear_lines (fn [] int
+  (let cleared int 0)
+  (let ri int (- ROWS 1))
+  (while (>= ri 0)
+    (begin
+      (let full int 1)
+      (let ci2 int 0)
+      (while (< ci2 COLS)
+        (begin
+          (if (= board[(+ (* ri COLS) ci2)] 0) (set full 0))
+          (set ci2 (+ ci2 1))
+        ))
+      (if (= full 1)
+        (begin
+          (set cleared (+ cleared 1))
+          (let si int (- ri 1))
+          (while (>= si 0)
+            (begin
+              (let sc int 0)
+              (while (< sc COLS)
+                (begin
+                  (set board[(+ (* (+ si 1) COLS) sc)] board[(+ (* si COLS) sc)])
+                  (set sc (+ sc 1))
+                ))
+              (set si (- si 1))
+            ))
+          (let tc int 0)
+          (while (< tc COLS)
+            (begin
+              (set board[tc] 0)
+              (set tc (+ tc 1))
+            ))
+        ))
+      (set ri (- ri 1))
+    ))
+  (ret cleared)))
+
+// Helper: check if game over (spawned piece overlaps)
+(let check_game_over (fn [] int
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (if (blocked cx[_i] cy[_i]) (ret 1))
+      (set _i (+ _i 1))
+    ))
+  (ret 0)))
+
+// Helper: handle key press
+(let handle_key (fn [(kc int)] void
+  (if (= kc KE) (set over 1))
+  (if (= kc KL) (try_move -1 0))
+  (if (= kc KR) (try_move 1 0))
+  (if (= kc KD) (try_move 0 1))
+  (if (= kc KU)
+    (begin
+      (let nr (% (+ pr 1) 4))
+      (set _ok 1)
+      (set _i 0)
+      (let nbase (+ (* pk 32) (* nr 8)))
+      (while (< _i 4)
+        (begin
+          (set _nx (+ ppx SH[(+ nbase (* _i 2))]))
+          (set _ny (+ ppy SH[(+ nbase (+ (* _i 2) 1))]))
+          (if (blocked _nx _ny) (set _ok 0))
+          (set _i (+ _i 1))
+        ))
+      (if (= _ok 1)
+        (begin
+          (set pr nr)
+          (update_cells)
+        ))
+    )))
+
+// Main
 (SDL_Init SDL_I)
 (set window (SDL_CreateWindow "Clumsy Tetris" WP WP WW WH 4))
 
@@ -81,19 +218,7 @@
     (if (= renderer 0)
       (printf "No renderer\n")
       (begin
-        // Spawn first piece
-        (set pk (% timer 7))
-        (set pr 0)
-        (set ppx 3)
-        (set ppy 0)
-        (set base (+ (* pk 32) (* pr 8)))
-        (set _i 0)
-        (while (< _i 4)
-          (begin
-            (set cx[_i] (+ ppx SH[(+ base (* _i 2))]))
-            (set cy[_i] (+ ppy SH[(+ base (+ (* _i 2) 1))]))
-            (set _i (+ _i 1))
-          ))
+        (spawn)
 
         // GAME LOOP
         (while (= over 0)
@@ -107,239 +232,20 @@
               (begin
                 (let etype (& ev[0] 0xFFFF))
                 (if (= etype EQ) (set over 1))
-                (if (= etype EK)
-                  (begin
-                    (let kc (>> ev[2] 32))
-                    (if (= kc KE) (set over 1))
-
-                    // Left
-                    (if (= kc KL)
-                      (begin
-                        (set _ok 1)
-                        (set _i 0)
-                        (while (< _i 4)
-                          (begin
-                            (set _nx (- cx[_i] 1))
-                            (set _ny cy[_i])
-                            (if (< _nx 0) (set _ok 0))
-                            (if (>= _ny 0)
-                              (if (< _ny ROWS)
-                                (if (>= _nx 0)
-                                  (if (< _nx COLS)
-                                    (if (> board[(+ (* _ny COLS) _nx)] 0)
-                                      (set _ok 0))))))
-                            (set _i (+ _i 1))
-                          ))
-                        (if (= _ok 1)
-                          (begin
-                            (set ppx (- ppx 1))
-                            (set _i 0)
-                            (while (< _i 4)
-                              (begin
-                                (set cx[_i] (- cx[_i] 1))
-                                (set _i (+ _i 1))
-                              ))
-                          ))
-                      ))
-
-                    // Right
-                    (if (= kc KR)
-                      (begin
-                        (set _ok 1)
-                        (set _i 0)
-                        (while (< _i 4)
-                          (begin
-                            (set _nx (+ cx[_i] 1))
-                            (set _ny cy[_i])
-                            (if (>= _nx COLS) (set _ok 0))
-                            (if (>= _ny 0)
-                              (if (< _ny ROWS)
-                                (if (>= _nx 0)
-                                  (if (< _nx COLS)
-                                    (if (> board[(+ (* _ny COLS) _nx)] 0)
-                                      (set _ok 0))))))
-                            (set _i (+ _i 1))
-                          ))
-                        (if (= _ok 1)
-                          (begin
-                            (set ppx (+ ppx 1))
-                            (set _i 0)
-                            (while (< _i 4)
-                              (begin
-                                (set cx[_i] (+ cx[_i] 1))
-                                (set _i (+ _i 1))
-                              ))
-                          ))
-                      ))
-
-                    // Down
-                    (if (= kc KD)
-                      (begin
-                        (set _ok 1)
-                        (set _i 0)
-                        (while (< _i 4)
-                          (begin
-                            (set _nx cx[_i])
-                            (set _ny (+ cy[_i] 1))
-                            (if (>= _ny ROWS) (set _ok 0))
-                            (if (>= _ny 0)
-                              (if (>= _nx 0)
-                                (if (< _nx COLS)
-                                  (if (> board[(+ (* _ny COLS) _nx)] 0)
-                                    (set _ok 0)))))
-                            (set _i (+ _i 1))
-                          ))
-                        (if (= _ok 1)
-                          (begin
-                            (set ppy (+ ppy 1))
-                            (set _i 0)
-                            (while (< _i 4)
-                              (begin
-                                (set cy[_i] (+ cy[_i] 1))
-                                (set _i (+ _i 1))
-                              ))
-                          ))
-                      ))
-
-                    // Up = rotate
-                    (if (= kc KU)
-                      (begin
-                        (let nr (% (+ pr 1) 4))
-                        (set _ok 1)
-                        (set _i 0)
-                        (set base (+ (* pk 32) (* nr 8)))
-                        (while (< _i 4)
-                          (begin
-                            (set _nx (+ ppx SH[(+ base (* _i 2))]))
-                            (set _ny (+ ppy SH[(+ base (+ (* _i 2) 1))]))
-                            (if (< _nx 0) (set _ok 0))
-                            (if (>= _nx COLS) (set _ok 0))
-                            (if (>= _ny ROWS) (set _ok 0))
-                            (if (>= _ny 0)
-                              (if (>= _nx 0)
-                                (if (< _nx COLS)
-                                  (if (> board[(+ (* _ny COLS) _nx)] 0)
-                                    (set _ok 0)))))
-                            (set _i (+ _i 1))
-                          ))
-                        (if (= _ok 1)
-                          (begin
-                            (set pr nr)
-                            (set base (+ (* pk 32) (* pr 8)))
-                            (set _i 0)
-                            (while (< _i 4)
-                              (begin
-                                (set cx[_i] (+ ppx SH[(+ base (* _i 2))]))
-                                (set cy[_i] (+ ppy SH[(+ base (+ (* _i 2) 1))]))
-                                (set _i (+ _i 1))
-                              ))
-                          ))
-                      ))
-                  ))
+                (if (= etype EK) (handle_key (>> ev[2] 32)))
                 (set has (SDL_PollEvent (& ev)))
               ))
 
             // Gravity
             (if (= (% timer DROP) 0)
               (begin
-                (set _ok 1)
-                (set _i 0)
-                (while (< _i 4)
+                (if (= (try_move 0 1) 0)
                   (begin
-                    (set _nx cx[_i])
-                    (set _ny (+ cy[_i] 1))
-                    (if (>= _ny ROWS) (set _ok 0))
-                    (if (>= _ny 0)
-                      (if (>= _nx 0)
-                        (if (< _nx COLS)
-                          (if (> board[(+ (* _ny COLS) _nx)] 0)
-                            (set _ok 0)))))
-                    (set _i (+ _i 1))
-                  ))
-                (if (= _ok 1)
-                  (begin
-                    (set ppy (+ ppy 1))
-                    (set _i 0)
-                    (while (< _i 4)
-                      (begin
-                        (set cy[_i] (+ cy[_i] 1))
-                        (set _i (+ _i 1))
-                      ))
-                  )
-                  (begin
-                    // Lock piece
-                    (set _i 0)
-                    (while (< _i 4)
-                      (begin
-                        (if (>= cy[_i] 0)
-                          (if (>= cx[_i] 0)
-                            (if (< cx[_i] COLS)
-                              (if (< cy[_i] ROWS)
-                                (set board[(+ (* cy[_i] COLS) cx[_i])] (+ pk 1))))))
-                        (set _i (+ _i 1))
-                      ))
-                    // Clear lines
-                    (let ri int (- ROWS 1))
-                    (let cleared int 0)
-                    (while (>= ri 0)
-                      (begin
-                        (let full int 1)
-                        (let ci2 int 0)
-                        (while (< ci2 COLS)
-                          (begin
-                            (if (= board[(+ (* ri COLS) ci2)] 0) (set full 0))
-                            (set ci2 (+ ci2 1))
-                          ))
-                        (if (= full 1)
-                          (begin
-                            (set cleared (+ cleared 1))
-                            (let si int (- ri 1))
-                            (while (>= si 0)
-                              (begin
-                                (let sc int 0)
-                                (while (< sc COLS)
-                                  (begin
-                                    (set board[(+ (* (+ si 1) COLS) sc)] board[(+ (* si COLS) sc)])
-                                    (set sc (+ sc 1))
-                                  ))
-                                (set si (- si 1))
-                              ))
-                            (let tc int 0)
-                            (while (< tc COLS)
-                              (begin
-                                (set board[tc] 0)
-                                (set tc (+ tc 1))
-                              ))
-                          ))
-                        (set ri (- ri 1))
-                      ))
+                    (lock)
+                    (let cleared int (clear_lines))
                     (set score (+ score (* cleared 10)))
-                    // Spawn new
-                    (set pk (% (+ score timer) 7))
-                    (set pr 0)
-                    (set ppx 3)
-                    (set ppy 0)
-                    (set base (+ (* pk 32) (* pr 8)))
-                    (set _i 0)
-                    (while (< _i 4)
-                      (begin
-                        (set cx[_i] (+ ppx SH[(+ base (* _i 2))]))
-                        (set cy[_i] (+ ppy SH[(+ base (+ (* _i 2) 1))]))
-                        (set _i (+ _i 1))
-                      ))
-                    (set _ok 1)
-                    (set _i 0)
-                    (while (< _i 4)
-                      (begin
-                        (if (>= cy[_i] 0)
-                          (if (< cy[_i] ROWS)
-                            (if (>= cx[_i] 0)
-                              (if (< cx[_i] COLS)
-                                (if (> board[(+ (* cy[_i] COLS) cx[_i])] 0)
-                                  (set _ok 0))))))
-                        (set _i (+ _i 1))
-                      ))
-                    (if (= _ok 0) (set over 1))
+                    (spawn)
+                    (if (= (check_game_over) 0) 0 (set over 1))
                   ))
               ))
 
@@ -373,16 +279,13 @@
             (set _i 0)
             (while (< _i 4)
               (begin
-                (if (>= cy[_i] 0)
-                  (if (< cy[_i] ROWS)
-                    (if (>= cx[_i] 0)
-                      (if (< cx[_i] COLS)
-                        (begin
-                          (SDL_SetRenderDrawColor renderer CR[pk] CG[pk] CB[pk] 255)
-                          (set rc[0] (+ (* cx[_i] CS) (<< (* cy[_i] CS) 32)))
-                          (set rc[1] (+ CS (<< CS 32)))
-                          (SDL_RenderFillRect renderer (& rc))
-                        )))))
+                (if (in_bounds cx[_i] cy[_i])
+                  (begin
+                    (SDL_SetRenderDrawColor renderer CR[pk] CG[pk] CB[pk] 255)
+                    (set rc[0] (+ (* cx[_i] CS) (<< (* cy[_i] CS) 32)))
+                    (set rc[1] (+ CS (<< CS 32)))
+                    (SDL_RenderFillRect renderer (& rc))
+                  ))
                 (set _i (+ _i 1))
               ))
 

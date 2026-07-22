@@ -1,11 +1,27 @@
 # Completed Work
 
+## Phase 0: Missing Control Constructs
+
+### Logical Operators (short-circuit evaluation)
+- `(&& a b)` — logical AND: returns 1 if both sides non-zero, short-circuits on first zero
+- `(|| a b)` — logical OR: returns 1 if either side non-zero, short-circuits on first non-zero
+- `(! expr)` — prefix logical not: returns 1 if expr is 0, else 0
+- Codegen uses `cbz`/`cbnz` + label sequences for short-circuit evaluation
+
+### Loop Control
+- `break` keyword: exits innermost while loop (generates `b <end_label>`)
+- `continue` keyword: jumps back to loop condition (generates `b <loop_label>`)
+- `LoopContext` stack in `CodeGen` tracks break/continue targets for nested loops
+- Error on `break`/`continue` outside of loop
+
+---
+
 ## Cleanup & Syntax Revision (Phases 1–5)
 
 ### Test Suite Reorganization
 - Demos moved to `examples/`: real_tetris, sdl_demo, sdl_loop, sdl_bindings, tcp_client, tcp_server, c_interop_demo
 - Deleted obsolete tests; recreated `test_loop_basic.cpl`
-- 31 tests retained, all with `.expected` files (except `test_c_interop` compile-smoke)
+- 34 tests retained, all with `.expected` files (except `test_c_interop` compile-smoke)
 - Tests using broken `printf` varargs rewritten to use `print_int`/`print_str` helpers
 
 ### Tokenizer & Parser Syntax

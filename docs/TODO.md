@@ -5,6 +5,8 @@
 Replace the monolithic `compiler.c` (1700 lines of direct AST→ARM64 emission) with a
 proper IR pipeline: **AST → IR → CFG → DFA → SSA → scalar opts → backend**.
 
+**Phase 0 complete.** Full plan documented in `docs/codegen-rework-plan.md`.
+
 ### Phase 1 — IR & CFG
 
 - [ ] **Design IR instruction set** — three-address code,SSA-ready. Ops: `mov`, `load`,

@@ -3,6 +3,12 @@
 
 #include "types.h"
 
+// Loop context for break/continue targets
+typedef struct {
+    char *break_label;      // target for break (end of loop)
+    char *continue_label;   // target for continue (back to condition)
+} LoopContext;
+
 // Code generation context
 typedef struct {
     char *output;
@@ -16,6 +22,8 @@ typedef struct {
     int scratch_offset;   // stack offset for binary expression scratch slots (beyond all local vars)
     int scratch_depth;    // nesting depth for scratch slot allocation
     char *current_epilogue_label;  // label for current function's epilogue (used by ret)
+    LoopContext loop_stack[64];    // stack of loop contexts for break/continue
+    int loop_depth;                // current loop nesting depth
 } CodeGen;
 
 // Compiler functions
