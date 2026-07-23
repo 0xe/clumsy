@@ -111,6 +111,49 @@
 
 ---
 
+## Multi-File Compilation
+
+### `pub` keyword and symbol visibility
+- `pub` keyword added to tokenizer keywords list (acts like `let` but sets `is_public`)
+- `Symbol` struct has `is_public` (pub: exported with .globl) and `is_global` (top-level let/pub: stored in .data)
+- `add_symbol` skips stack allocation for `is_global`/`is_external` symbols (sets `stack_offset = -1`)
+- `total_scope_size` / `total_tree_size` exclude extern/global vars from stack frame size
+
+### Global variables in `.data` section
+- Top-level `let`/`pub` emit to `.data` section: `.word` for ints, `.asciz` for strings, `.quad` for arrays
+- `.globl` only emitted for `pub` symbols
+- `emit_load_variable` / `emit_store_variable` check `sym->is_global` and use `adrp`/`add` addressing
+- `[]` array read for globals: uses `adrp`/`add` for base, index computed before base load to avoid register clobbering
+- `set []` array write for globals: same pattern — index first, then base, then store
+- `(& global)` address-of: uses `adrp`/`add` for global variables
+
+### Extern for variables
+- `(extern name type)` — function externs have `[params]` making 3+ children, variable externs have 2
+- `stmt->data.list.count >= 3` distinguishes function externs from variable externs
+
+### Multi-file build system
+- `example_runner.cmake` rewritten: passes `-DEXAMPLE_DIR`, globs `.cpl` files, sorts with `main.cpl` first
+- Each file compiled to `.o`, linked together with `clang`
+- `generate_main_function` removed: dead code deleted from compiler.c and compiler.h
+- All 40 tests wrapped in `pub main (fn [] int ...)` — all passing
+
+---
+
+## Tetris Multi-File Refactor
+
+### File structure
+- `config.cpl` — constants, colors, shapes (no SDL externs needed)
+- `tetrominos.cpl` — game state, piece logic, input handling (pub functions)
+- `render.cpl` — drawing helpers: `draw_cell`, `draw_board`, `draw_piece`, `draw_grid`, `render_frame`, `draw_game_over`
+- `main.cpl` — init, game loop, cleanup (~60 lines)
+
+### Local temp variables
+- Removed shared globals `_i`, `_ok`, `_nx`, `_ny`, `base`
+- Each function declares its own local `(let _i int 0)` where needed
+- Real shared state remains global: `window`, `renderer`, `board`, `pk`, `pr`, `ppx`, `ppy`, `score`, `over`, `timer`, `ev`, `rc`, `cx`, `cy`
+
+---
+
 ## Test Suite Audit (from review.md)
 
 ### Silent Code Omission (Fixed)

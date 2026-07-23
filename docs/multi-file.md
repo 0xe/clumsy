@@ -90,50 +90,59 @@ resolves the actual address.
 ## Example project layout
 
 ```
-project/
-  config.cpl       (pub ROWS, pub COLS, pub EMPTY)
-  tetrominos.cpl   (pub SHAPE — pub fn for shape access)
-  render.cpl       (pub render — pub fn using SDL)
-  main.cpl         (pub main — program entry point)
+tetris/
+  config.cpl       (pub COLS, pub ROWS, pub SH — constants and shape data)
+  tetrominos.cpl   (pub spawn, pub lock, pub clear_lines — game logic)
+  render.cpl       (pub draw_cell, pub render_frame — drawing helpers)
+  main.cpl         (pub main — entry point, game loop)
 ```
 
 ```clumsy
 // config.cpl
-(pub ROWS int 20)
 (pub COLS int 10)
-(pub EMPTY int -1)
+(pub ROWS int 20)
+(pub CS int 32)
 
 // tetrominos.cpl
-(pub SHAPE int[224] [...])
-(pub blocked (fn [...] int ...))
+(extern COLS int)
+(extern ROWS int)
+(pub board int[200] [0])
+(pub pk int 0)
+(pub spawn (fn [] void ...))
+(pub lock (fn [] void ...))
 
 // render.cpl
-(extern SHAPE int[224])
-(extern ROWS int)
 (extern COLS int)
-(extern EMPTY int)
-(pub render (fn [...] void ...))
+(extern ROWS int)
+(extern board int[200])
+(pub draw_cell (fn [(col int) (row int) (ci int)] void ...))
+(pub render_frame (fn [] void ...))
 
 // main.cpl
-(extern ROWS int)
 (extern COLS int)
-(extern render [(* void) (* int) int] void)
+(extern ROWS int)
+(extern spawn [void] void)
+(extern render_frame [void] void)
 (pub main (fn [] int
-  (let board int[200] [0])
-  (render ...)
+  (spawn)
+  (while (= over 0) (render_frame))
   (ret 0)))
 ```
 
-Build: `clumsyc config.cpl tetrominos.cpl render.cpl main.cpl -o game`
+Build via the example runner (compiles all `.cpl` files in the directory):
+
+```bash
+cmake --build build --target build-tetris
+```
 
 ## Migration checklist
 
-- [ ] Add `pub` to all functions/variables exported from library files
-- [ ] Add `extern` declarations in files that reference cross-file symbols
-- [ ] Wrap top-level executable code in `(pub main (fn [] int ...))`
-- [ ] Update all 34 tests to define `main` explicitly
-- [ ] Update example programs to use `main`
-- [ ] Update `CLAUDE.md` language reference
+- [x] Add `pub` to all functions/variables exported from library files
+- [x] Add `extern` declarations in files that reference cross-file symbols
+- [x] Wrap top-level executable code in `(pub main (fn [] int ...))`
+- [x] Update all 40 tests to define `main` explicitly
+- [x] Update example programs to use `main`
+- [x] Update `CLAUDE.md` language reference
 
 ## Compiler changes required
 

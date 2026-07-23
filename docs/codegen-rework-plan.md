@@ -297,7 +297,7 @@ Extend `ir_build.c` to handle all AST node types:
 - **Hex literals**: Just integer constants, already handled.
 - **Negative literals**: Tokenized as single int, already handled.
 
-**Test**: All 31 existing tests pass through `--backend=qbe` and produce identical output to `--backend=aarch64-legacy`.
+**Test**: All 40 existing tests pass through `--backend=qbe` and produce identical output to `--backend=aarch64-legacy`.
 
 **Milestone**: tetris compiles and runs through the QBE pipeline.
 
@@ -479,7 +479,7 @@ Default: `aarch64-legacy` (existing behavior). Switch to `qbe` once the new pipe
 
 ## Testing Strategy
 
-- **Regression**: All 31 existing tests pass with both `--backend=aarch64-legacy` and `--backend=qbe`
+- **Regression**: All 40 existing tests pass with both `--backend=aarch64-legacy` and `--backend=qbe`
 - **Output comparison**: For each test, stdout of both backends must be identical
 - **IR-level tests**: New tests in `tests/ir/` that verify IR output, SSA form, optimization results
 - **Tetris**: Compiles and runs through both backends

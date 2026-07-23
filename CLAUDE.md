@@ -37,6 +37,19 @@ S-expression syntax. Every statement is a parenthesised form.
 (set x 99)
 ```
 
+### Public symbols
+
+`pub` marks a symbol with external linkage (`.globl`). Without `pub`, symbols are file-private.
+
+```clumsy
+(pub COLS int 10)              // global, exported
+(let board int[200] [0])       // global, file-private
+(pub main (fn [] int ...))     // exported function
+(let helper (fn [...] ...))    // file-private function
+```
+
+Top-level `let`/`pub` emit to `.data` (not the stack). `extern` references them from other files.
+
 ### Arithmetic & comparison
 
 ```clumsy

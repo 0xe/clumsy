@@ -36,9 +36,17 @@ S-expression syntax.
 ### Arithmetic & Comparison
 
 ```clumsy
-(+ x 1)   (- a b)   (* x y)   (/ n 2)   (% n 2)
+(+ x 1)   (- a b)   (* x y)   (/ n 2)   (% n 2)   (** base exp)
 (< a b)   (> a b)   (<= a b)  (>= a b)  (= a b)
 (not (= a b))
+```
+
+### Logical Operators
+
+```clumsy
+(! expr)          // prefix logical not
+(&& a b)          // logical AND (short-circuit)
+(|| a b)          // logical OR (short-circuit)
 ```
 
 ### Bitwise Operations
@@ -61,6 +69,8 @@ S-expression syntax.
 (while condition
   (begin
     stmt1
+    (if condition (break))       // exit loop
+    (if other (continue))       // skip to next iteration
     stmt2))
 ```
 
@@ -77,8 +87,8 @@ S-expression syntax.
 ### Pointers
 
 ```clumsy
-(let p *int &x)   // address-of
-(* ptr)            // dereference
+(let p *int (& x))   // address-of
+(* p)                 // dereference
 ```
 
 ### Arrays
@@ -114,24 +124,40 @@ Declare external C functions, then call them normally.
 
 ### Multi-File Programs
 
-Each `.cpl` file compiles to a `.o`. Link them together:
+Each `.cpl` file compiles to a `.o`. Use `pub` to export, `extern` to import:
 
 ```clumsy
-// board.cpl
-(let init-board (fn [...] int
-  (begin ...)))
+// config.cpl — library file, no main
+(pub COLS int 10)
+(pub ROWS int 20)
 
-// main.cpl
-(extern init-board [...] int)
-(init-board)
+// render.cpl — library file
+(extern COLS int)
+(extern ROWS int)
+(pub render (fn [...] void ...))
+
+// main.cpl — entry point
+(extern COLS int)
+(extern render [...] void)
+(pub main (fn [] int
+  (render ...)
+  (ret 0)))
 ```
 
 ```bash
-./build/clumsyc board.cpl > board.s
+./build/clumsyc config.cpl > config.s
+./build/clumsyc render.cpl > render.s
 ./build/clumsyc main.cpl > main.s
-as -o board.o board.s
+as -o config.o config.s
+as -o render.o render.s
 as -o main.o main.s
-cc -o game board.o main.o
+cc -o game config.o render.o main.o
+```
+
+The example runner handles this automatically for files in `examples/`:
+
+```bash
+cmake --build build --target build-tetris
 ```
 
 ## Examples
@@ -144,10 +170,11 @@ cmake --build build --target examples
 
 | Example | Description |
 |---------|-------------|
-| `tetris/` | Full Tetris game using SDL2 |
+| `tetris/` | Full Tetris game (4 files: config, tetrominos, render, main) |
 | `sdl/` | SDL2 window and renderer demo |
-| `tcp/` | TCP client/server using SDL2_net |
 | `c_interop/` | Demonstrates C function calls |
+| `tcp_client/` | TCP client using SDL2_net |
+| `tcp_server/` | TCP server using SDL2_net |
 
 ## Tests
 
@@ -172,8 +199,9 @@ cmake --build build && ctest --test-dir build
 | Variables (int, str, char) | Done |
 | Arithmetic (+, -, \*, /, %, \*\*) | Done |
 | Comparisons (=, <, >, <=, >=) | Done |
+| Logical operators (!, &&, \|\|, not) | Done |
 | Bitwise (&, \|, >>, <<, ~) | Done |
-| Logical not | Done |
+| Loop control (break, continue) | Done |
 | Negative integer literals | Done |
 | Arrays (static, element access, assignment) | Done |
 | Structs (field access, nested) | Done |
@@ -183,6 +211,8 @@ cmake --build build && ctest --test-dir build
 | C interop (extern declarations) | Done |
 | SDL2 bindings (events, rendering) | Done |
 | Multi-file compilation & linking | Done |
+| `pub` / `extern` symbol visibility | Done |
+| Global variables (.data section) | Done |
 | Lexical scoping (nested symbol tables) | Done |
 | String literals (interned in .data) | Done |
 | Float/double | Not yet |
