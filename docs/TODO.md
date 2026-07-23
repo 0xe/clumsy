@@ -1,35 +1,29 @@
 # TODO
 
-## Current: New Codegen Pipeline
+## Current: AST → IR → QBE Pipeline
 
-Replace the monolithic `compiler.c` (1700 lines of direct AST→ARM64 emission) with a
-proper IR pipeline: **AST → IR → CFG → DFA → SSA → scalar opts → backend**.
+Replace the monolithic `compiler.c` (AST → ARM64) with a proper IR pipeline: **AST → IR → CFG → SSA → scalar opts → backend**.
 
 **Phase 0 complete.** Full plan documented in `docs/codegen-rework-plan.md`.
 
-### Phase 1 — IR & CFG
+### Phase 1 — AST → IR → QBE (Full Language Coverage)
 
-- [ ] **Design IR instruction set** — three-address code,SSA-ready. Ops: `mov`, `load`,
-  `store`, `add`/`sub`/`mul`/`div`/`mod`, `cmp`/`br`, `call`, `ret`, `phi`, `alloc`.
-  Types: `i64`, `ptr`, `void`. Each IR instruction has exactly one result (or none for
-  side-effect ops).
+Build the complete IR pipeline for all language features in one pass. No Phase 1/Phase 2 split.
 
-- [ ] **Basic block / CFG data structures** — `IRBlock` (id, list of instructions,
-  predecessors, successors), `IRFunction` (name, param list, block list, symbol table).
+- [ ] **IR data structures** — `src/ir.h`, `src/ir.c`. IR instructions, operands, basic blocks, functions.
+- [ ] **QBE emitter** — `src/emit_qbe.c`. IR → QBE IL text emission.
+- [ ] **AST→IR translation** — `src/ir_build.c`. Walk AST, emit IR for all node types.
+- [ ] **Backend selection** — Add `--backend=aarch64-legacy|qbe` flag to `src/main.c`.
+- [ ] **Core verification** — Simple test programs compile through QBE, output matches legacy.
+- [ ] **Full verification** — All 40 tests + tetris compile through QBE, output matches legacy.
 
-- [ ] **IR builder** — walk the AST, emit IR into basic blocks. Start with straight-line
-  code (expressions, assignments, let bindings). Handle `if`/`while` by splitting into
-  blocks with terminator branches.
-
-- [ ] **CFG construction** — wire up predecessor/successor edges as blocks are created.
-  Verify single-entry/multiple-exit structure.
-
-- [ ] **IR printer** — text dump for debugging (like LLVM's IR format). Replace the ARM64
-  `.s` stdout with IR dump as first milestone.
-
-### Phase 2 — SSA Construction
+### Phase 2 — CFG Construction + Dominator Analysis
 
 - [ ] **Dominance tree** — compute immediate dominators for each function's CFG.
+
+- [ ] **Dominance frontiers** — needed for phi insertion in Phase 3.
+
+### Phase 3 — SSA Construction
 
 - [ ] **Φ insertion** — place φ-nodes at dominance frontiers for every variable with
   multiple reaching definitions.
@@ -40,7 +34,7 @@ proper IR pipeline: **AST → IR → CFG → DFA → SSA → scalar opts → bac
 - [ ] **SSA verifier** — sanity check: every `load` dominates all uses, every `phi` is at
   a proper frontier, no undefined variable references.
 
-### Phase 3 — Scalar Optimizations (on SSA)
+### Phase 4 — Scalar Optimizations (on SSA)
 
 - [ ] **Constant folding** — evaluate `const op const` at compile time.
 
@@ -53,34 +47,13 @@ proper IR pipeline: **AST → IR → CFG → DFA → SSA → scalar opts → bac
 
 - [ ] **Strength reduction** — `mul by power of 2` → `lsl`, `div by power of 2` → `asr`.
 
-### Phase 4 — Backend: ARM64/macOS
-
-- [ ] **Register allocator** — simple graph-coloring or linear-scan. 12 GP registers
-  (x0-x15 callee-saved is x19-x28 + x29/x30), 8 arg registers (x0-x7). Handle spills
-  to stack.
-
-- [ ] **Instruction selection** — map IR ops to ARM64 instructions. Peephole patterns
-  for common idioms (load/store offsets, fused shifts, etc.).
-
-- [ ] **Stack frame layout** — variable placement, alignment, frame pointer setup. Handle
-  large frames (>4095 bytes) with register-indirect sub.
-
-- [ ] **Calling convention** — Darwin ARM64 ABI: named args in x0-x7, variadic args on
-  stack. Spill layout must match `va_start` expectations (named arg NOT at `[sp, #0]`).
-
-- [ ] **String literals** — `.data` section emission with `adrp`/`add` addressing.
-
-- [ ] **External C functions** — `_` prefix, resolve from libc/libSDL at link time.
-
-### Phase 5 — Backend: LLVM IR or QBE
+### Phase 5 — Future Backends
 
 - [ ] **QBE backend** — map IR to QBE's SSA-like IR text format, pipe to `qbe` compiler.
-  Simpler than LLVM, good first target.
 
-- [ ] **LLVM backend** (optional) — map IR to LLVM C API or textual IR. Full optimization
-  pipeline for free, but heavier dependency.
+- [ ] **LLVM backend** (optional) — map IR to LLVM C API or textual IR.
 
-- [ ] **Multi-backend dispatch** — CLI flag to select backend (`--backend arm64|qbe|llvm`).
+- [ ] **Native ARM64 backend** — register allocation, instruction selection, ABI compliance.
 
 ---
 

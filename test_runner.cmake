@@ -5,28 +5,75 @@
 #   TEST_FILE      path to .cpl test source
 #   TMP_DIR        temp directory for intermediate files
 #   TEST_DIR       path to tests/ (for .expected files)
+#
+# Optional:
+#   BACKEND        "qbe" (default) or "legacy"
+
+if(NOT DEFINED BACKEND)
+    set(BACKEND "qbe")
+endif()
 
 get_filename_component(TEST_NAME ${TEST_FILE} NAME_WE)
 
-# Compile
-execute_process(
-    COMMAND ${COMPILER} ${TEST_FILE}
-    OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.s
-    ERROR_VARIABLE COMPILE_ERR
-    RESULT_VARIABLE COMPILE_RC
-)
-if(NOT COMPILE_RC EQUAL 0)
-    message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
-endif()
+if(BACKEND STREQUAL "qbe")
+    # QBE pipeline: source → QBE IL → assembly → object → executable
+    execute_process(
+        COMMAND ${COMPILER} --backend=qbe ${TEST_FILE}
+        OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.qbe
+        ERROR_VARIABLE COMPILE_ERR
+        RESULT_VARIABLE COMPILE_RC
+    )
+    if(NOT COMPILE_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
+    endif()
 
-# Link (no extra libraries needed — printf is in libc)
-execute_process(
-    COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.s
-    ERROR_VARIABLE LINK_ERR
-    RESULT_VARIABLE LINK_RC
-)
-if(NOT LINK_RC EQUAL 0)
-    message(FATAL_ERROR "FAIL (link error): ${LINK_ERR}")
+    execute_process(
+        COMMAND qbe -o ${TMP_DIR}/${TEST_NAME}.s -
+        INPUT_FILE ${TMP_DIR}/${TEST_NAME}.qbe
+        ERROR_VARIABLE QBE_ERR
+        RESULT_VARIABLE QBE_RC
+    )
+    if(NOT QBE_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (qbe error): ${QBE_ERR}")
+    endif()
+
+    execute_process(
+        COMMAND clang -c -o ${TMP_DIR}/${TEST_NAME}.o ${TMP_DIR}/${TEST_NAME}.s
+        ERROR_VARIABLE ASM_ERR
+        RESULT_VARIABLE ASM_RC
+    )
+    if(NOT ASM_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (assemble error): ${ASM_ERR}")
+    endif()
+
+    execute_process(
+        COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.o
+        ERROR_VARIABLE LINK_ERR
+        RESULT_VARIABLE LINK_RC
+    )
+    if(NOT LINK_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (link error): ${LINK_ERR}")
+    endif()
+else()
+    # Legacy ARM64 pipeline: source → assembly → executable
+    execute_process(
+        COMMAND ${COMPILER} ${TEST_FILE}
+        OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.s
+        ERROR_VARIABLE COMPILE_ERR
+        RESULT_VARIABLE COMPILE_RC
+    )
+    if(NOT COMPILE_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
+    endif()
+
+    execute_process(
+        COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.s
+        ERROR_VARIABLE LINK_ERR
+        RESULT_VARIABLE LINK_RC
+    )
+    if(NOT LINK_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (link error): ${LINK_ERR}")
+    endif()
 endif()
 
 # Run and compare (only if .expected exists)

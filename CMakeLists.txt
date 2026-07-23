@@ -15,6 +15,9 @@ set(COMPILER_SOURCES
     src/tokenizer.c
     src/parser.c
     src/compiler.c
+    src/ir.c
+    src/ir_build.c
+    src/emit_qbe.c
 )
 
 set(COMPILER_HEADERS
@@ -22,6 +25,7 @@ set(COMPILER_HEADERS
     src/tokenizer.h
     src/parser.h
     src/compiler.h
+    src/ir.h
 )
 
 add_executable(clumsyc ${COMPILER_SOURCES} ${COMPILER_HEADERS})
@@ -31,6 +35,10 @@ set_target_properties(clumsyc PROPERTIES
 
 # --- Tests ---
 enable_testing()
+
+if(NOT DEFINED TEST_BACKEND)
+    set(TEST_BACKEND "qbe")
+endif()
 
 file(GLOB TEST_FILES "${CMAKE_SOURCE_DIR}/tests/*.cpl")
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/tmp)
@@ -45,6 +53,7 @@ foreach(test_file ${TEST_FILES})
             -DTEST_FILE=${test_file}
             -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
             -DTEST_DIR=${CMAKE_SOURCE_DIR}/tests
+            -DBACKEND=${TEST_BACKEND}
             -P ${CMAKE_SOURCE_DIR}/test_runner.cmake
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     )

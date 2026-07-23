@@ -40,91 +40,36 @@ The legacy backend is invoked via `--backend=aarch64-legacy` (default for now). 
 
 ---
 
-## Phase 0: Pre-work — Missing Language Features
+## Phase 0: Pre-work — Missing Language Features (COMPLETE)
 
-These features must be implemented before (or alongside) the IR pipeline because they affect control flow representation.
-
-### `||` and `&&` — Logical operators with short-circuit evaluation
-
-Tokenized as `TOKEN_OPERATOR` but **no codegen exists**. Using them today silently fails as "undeclared function".
-
-Syntax:
-```
-(|| expr1 expr2)    ; logical OR — returns 1 if either side is non-zero
-(&& expr1 expr2)    ; logical AND — returns 1 if both sides are non-zero
-```
-
-Codegen (short-circuit):
-```
-;; (|| a b)
-evaluate a
-cbnz x0, @true      ; short-circuit: if a is true, result is 1
-evaluate b
-cbnz x0, @true      ; if b is true, result is 1
-mov x0, #0          ; both false
-b @end
-@true:
-mov x0, #1
-@end:
-
-;; (&& a b)
-evaluate a
-cbz x0, @false       ; short-circuit: if a is false, result is 0
-evaluate b
-cbz x0, @false       ; if b is false, result is 0
-mov x0, #1
-b @end
-@false:
-mov x0, #0
-@end:
-```
-
-### `break` and `continue` — Loop control flow
-
-Not keywords, not parsed, not codegen'd. The tetris program works around this with flag variables and manual index increments.
-
-Syntax:
-```
-(while condition
-  (begin
-    (if (something) (break))
-    (if (other) (continue))
-    ...
-  ))
-```
-
-Implementation:
-1. Add `"break"` and `"continue"` to the keyword list in `src/tokenizer.c`
-2. Add a loop-label stack to `CodeGen`:
-   ```c
-   typedef struct {
-       char *break_label;      // target for break
-       char *continue_label;   // target for continue
-   } LoopContext;
-   ```
-3. `while` codegen pushes context before body, pops after
-4. `(break)` → `b <break_label>`
-5. `(continue)` → `b <continue_label>`
-
-### `!` prefix operator — Logical not
-
-Tokenized as `TOKEN_OPERATOR` but no codegen for prefix `!`. Only `(not expr)` works (identifier form). `(! expr)` fails.
-
-Syntax:
-```
-(! expr)    ; returns 1 if expr is 0, returns 0 if expr is non-zero
-```
-
-Codegen:
-```
-evaluate expr
-cmp x0, #0
-cset x0, eq      ; x0 = (x0 == 0) ? 1 : 0
-```
+Implemented `||`, `&&`, `!`, `break`, `continue`. All committed (`e27bfe8`).
 
 ---
 
-## Phase 1: IR + AST→IR Translation + QBE Emission
+## Phase 1: AST → IR → QBE (Full Language Coverage)
+
+Build the complete IR pipeline for all language features in one pass. No Phase 1/Phase 2 split — the IR data structures are the same regardless; we just grow the translation code.
+
+### Verification Checkpoints
+
+Build incrementally with verification at each step:
+
+1. **IR structures + QBE emitter** — define all types, emit basic QBE IL text
+2. **Core translation** — int/arithmetic/comparisons/if/while/ret/functions/locals
+3. **Verify core** — simple test program through QBE, compare output with legacy backend
+4. **Extend translation** — arrays, structs, pointers, globals, strings, C interop, variadic calls
+5. **Verify full** — all 40 tests + tetris through QBE, compare output with legacy backend
+
+### Backend Selection
+
+Add `--backend` flag to `src/main.c`:
+
+```
+./clumsyc --backend=aarch64-legacy source.cpl    # Default. Old direct ARM64 (macOS only)
+./clumsyc --backend=qbe source.cpl               # IR → QBE IL → assemble
+```
+
+Default: `aarch64-legacy`. Both backends coexist during development.
 
 ### IR Design
 
@@ -231,6 +176,10 @@ typedef struct {
     // String literals (emitted as data directives)
     struct { char *label; char *value; } *strings;
     int num_strings;
+
+    // Global data (for pub/let globals)
+    struct { char *name; int64_t value; bool is_string; char *str_val; int array_size; } *globals;
+    int num_globals;
 } IRFunction;
 ```
 
@@ -252,7 +201,7 @@ typedef struct {
 | `AST_IDENTIFIER` | `mov %t, %var` (register move from variable) |
 | Binary arithmetic `(+ a b)` | `add %t, %a, %b` |
 | Binary comparison `(= a b)` | `ceq %t, %a, %b` |
-| `(&& a b)` | Short-circuit: jnz sequence (see Phase 0) |
+| `(&& a b)` | Short-circuit: jnz sequence |
 | `(not x)` / `(! x)` | `ceq %t, %x, 0` |
 | `(let x type val)` | `alloc 16` for variable + `store %val, %ptr` |
 | `(set x val)` | `store %val, %x_ptr` |
@@ -262,48 +211,50 @@ typedef struct {
 | `(fn params ret body)` | Full function IR with prologue/epilogue |
 | `(call f args)` | `call $f(%a, %b, ...)` |
 | `(extern ...)` | No IR — external declarations are handled at emit time |
-| `arr[i]` (load) | `load %arr + i*16` (8 bytes per element + 8 bytes for size) |
-| `(set arr[i] val)` (store) | `store %val, %arr + i*16` |
+| `arr[i]` (load) | `load %arr + i*8` (8 bytes per element) |
+| `(set arr[i] val)` (store) | `store %val, %arr + i*8` |
 | `(& x)` (address-of) | `mov %t, %x` (variable is already a pointer) |
 | `(* ptr)` (dereference) | `load %t, %ptr` |
 | `(<< a b)` | `shl %t, %a, %b` |
 | `(>> a b)` | `shr %t, %a, %b` |
 | `(& a b)` (bitwise AND) | `and %t, %a, %b` |
 | `(~ x)` (bitwise NOT) | `not %t, %x` |
+| `(** a b)` (exponentiation) | `call $__clumsy_pow(%a, %b)` — helper function |
+| `println` | Normalized to `call $printf(...)` before IR |
 
-### End-to-end test
+### Design Decisions
+
+- **Exponentiation**: `(** a b)` remains an `IR_CALL` to helper function `__clumsy_pow`
+- **Print**: `println` normalized to `printf` call before IR generation — no special IR instruction
+- **Variadic calls**: QBE IL syntax `call $printf(l $fmt, ..., l %arg)` handled in emit_qbe.c
+- **String literals**: Emitted as `data $str_N = { b "text", b 0 }` in QBE
+- **Global variables**: Emitted as `data $name = { l value }` in QBE
+
+### Verification
 
 ```bash
+# Step 1: IR text output for inspection
+./clumsyc --backend=qbe examples/simple_arith.cpl > /tmp/test.ir
+cat /tmp/test.ir   # manual inspection
+
+# Step 2: Full pipeline — IR → QBE → assemble → run
 ./clumsyc --backend=qbe examples/simple_arith.cpl > /tmp/test.ssa
 qbe -o /tmp/test.s /tmp/test.ssa
 cc -o /tmp/test /tmp/test.s
 /tmp/test
+
+# Step 3: Compare output with legacy backend
+./build/clumsyc examples/simple_arith.cpl | ./build/clumsyc --backend=qbe examples/simple_arith.cpl -
+# (or run both and compare stdout)
 ```
 
-Start with programs using: int literals, arithmetic, comparisons, if/while/ret, functions with params, local variables. No arrays/structs/pointers yet.
+### End-to-end test
+
+Start with simple arithmetic programs, verify through QBE pipeline. Then extend to all 40 tests + tetris.
 
 ---
 
-## Phase 2: Full Language Coverage in IR
-
-Extend `ir_build.c` to handle all AST node types:
-
-- **Arrays**: `alloc (size * 16)` for stack arrays. Indexed load/store with computed offsets.
-- **Structs**: `alloc (field_count * 16)` for stack structs. Field access via constant offsets.
-- **Pointers**: `(& x)` is just `mov` (variable is already pointer). `(* ptr)` is `load`.
-- **C interop**: Extern declarations — no IR needed. At emit time, QBE handles external function calls.
-- **Variadic calls**: `call $printf(l $fmt, ..., l %arg)` — QBE IL syntax for variadic.
-- **String literals**: Emit as `data $str_N = { b "text", b 0 }` in QBE.
-- **Hex literals**: Just integer constants, already handled.
-- **Negative literals**: Tokenized as single int, already handled.
-
-**Test**: All 40 existing tests pass through `--backend=qbe` and produce identical output to `--backend=aarch64-legacy`.
-
-**Milestone**: tetris compiles and runs through the QBE pipeline.
-
----
-
-## Phase 3: CFG Construction + Dominator Analysis
+## Phase 2: CFG Construction + Dominator Analysis
 
 This is where the learning begins (Weeks 2-4 of the reading guide).
 
@@ -334,7 +285,7 @@ void compute_dominators(IRFunction *fn);
 ```c
 // DF(B) = set of blocks X where B dominates a predecessor of X
 //         but B does not strictly dominate X
-// Needed for phi insertion in Phase 4
+// Needed for phi insertion in Phase 3
 void compute_dominance_frontiers(IRFunction *fn);
 ```
 
@@ -344,7 +295,7 @@ Print dominator tree and dominance frontiers. Compare with hand-computed results
 
 ---
 
-## Phase 4: SSA Construction
+## Phase 3: SSA Construction
 
 Core learning exercise (Weeks 5-8 of the reading guide). Implements the Braun et al. 2013 algorithm.
 
@@ -398,7 +349,7 @@ Print SSA IR for test programs. Verify:
 
 ---
 
-## Phase 5: Scalar Optimizations
+## Phase 4: Scalar Optimizations
 
 Each optimization is an IR→IR pass (Weeks 9-10 of the reading guide).
 
@@ -440,9 +391,9 @@ void ir_optimize(IRFunction *fn) {
 
 ---
 
-## Phase 6: Future Backends (not in initial scope)
+## Phase 5: Future Backends (not in initial scope)
 
-After Phase 4 is solid, add backends incrementally:
+After Phase 3 is solid, add backends incrementally:
 
 ### LLVM IR Emission
 
@@ -485,13 +436,12 @@ Default: `aarch64-legacy` (existing behavior). Switch to `qbe` once the new pipe
 - **Tetris**: Compiles and runs through both backends
 - **Examples**: All examples compile and run through both backends
 
-Each phase includes verification checkpoints:
-- Phase 0: `&&`, `||`, `!`, `break`, `continue` work in existing tests
-- Phase 1: Simple programs compile through QBE pipeline
-- Phase 2: All programs compile through QBE pipeline
-- Phase 3: CFG and dominator tree print correctly
-- Phase 4: SSA form is correct (every variable defined once, uses reach definitions)
-- Phase 5: Optimizations produce correct results (compare output before/after)
+Verification checkpoints:
+- Phase 1 checkpoint 1: Simple programs compile through QBE pipeline
+- Phase 1 checkpoint 2: All programs compile through QBE pipeline
+- Phase 2: CFG and dominator tree print correctly
+- Phase 3: SSA form is correct (every variable defined once, uses reach definitions)
+- Phase 4: Optimizations produce correct results (compare output before/after)
 
 ---
 
@@ -502,21 +452,18 @@ Each phase includes verification checkpoints:
 |------|-------|---------|
 | `src/ir.h` | 1 | IR data structures |
 | `src/ir.c` | 1 | IR construction helpers |
-| `src/ir_build.c` | 1-2 | AST → IR translation |
-| `src/emit_qbe.c` | 1-2 | IR → QBE IL text |
-| `src/cfg.c` | 3 | CFG construction, dominator tree, dominance frontiers |
-| `src/ssa.c` | 4 | SSA construction (Braun et al.) |
-| `src/ir_opt.c` | 5 | Scalar optimization passes |
-| `tests/ir/` | 1-5 | IR-level test cases |
+| `src/ir_build.c` | 1 | AST → IR translation |
+| `src/emit_qbe.c` | 1 | IR → QBE IL text |
+| `src/cfg.c` | 2 | CFG construction, dominator tree, dominance frontiers |
+| `src/ssa.c` | 3 | SSA construction (Braun et al.) |
+| `src/ir_opt.c` | 4 | Scalar optimization passes |
+| `tests/ir/` | 1-4 | IR-level test cases |
 
 ### Modified files
 | File | Phase | Changes |
 |------|-------|---------|
-| `src/tokenizer.c` | 0 | Add `break`, `continue` keywords |
-| `src/parser.c` | 0 | Parse `break`, `continue` statements |
-| `src/compiler.c` | 0 | Add `&&`, `\|\|`, `!`, `break`, `continue` codegen |
 | `src/main.c` | 1 | Add `--backend` flag parsing |
-| `CMakeLists.txt` | 1 | Add new source files, QBE backend target |
+| `CMakeLists.txt` | 1 | Add new source files |
 
 ---
 
@@ -524,10 +471,9 @@ Each phase includes verification checkpoints:
 
 | Phase | Topics | Guide Weeks |
 |-------|--------|-------------|
-| Phase 0 | Control flow (short-circuit, break/continue) | — |
-| Phase 1 | Three-address code, IR design | 1 |
-| Phase 2 | Memory model, calling conventions | — |
-| Phase 3 | CFG construction, dominator tree, dominance frontiers | 2-4 |
-| Phase 4 | SSA construction (Braun et al. 2013) | 5-8 |
-| Phase 5 | DCE, constant propagation, constant folding | 9-10 |
-| Phase 6 | Register allocation, instruction selection (future) | 12-18 |
+| Phase 0 | Control flow (short-circuit, break/continue) | — (COMPLETE) |
+| Phase 1 | Three-address code, IR design, AST→IR, QBE emission | 1 |
+| Phase 2 | CFG construction, dominator tree, dominance frontiers | 2-4 |
+| Phase 3 | SSA construction (Braun et al. 2013) | 5-8 |
+| Phase 4 | DCE, constant propagation, constant folding | 9-10 |
+| Phase 5 | Register allocation, instruction selection (future) | 12-18 |
