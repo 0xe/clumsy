@@ -1,0 +1,91 @@
+// render.cpl — Drawing helpers
+(extern COLS int)
+(extern ROWS int)
+(extern CS int)
+(extern WW int)
+(extern WH int)
+(extern CR int[7])
+(extern CG int[7])
+(extern CB int[7])
+
+(extern renderer (* void))
+(extern board int[200])
+(extern pk int)
+(extern rc int[2])
+(extern cx int[4])
+(extern cy int[4])
+(extern _i int)
+
+(extern SDL_SetRenderDrawColor [(* void) int int int int] int)
+(extern SDL_RenderClear [(* void)] int)
+(extern SDL_RenderPresent [(* void)] void)
+(extern SDL_RenderFillRect [(* void) (* void)] int)
+(extern SDL_PumpEvents [] void)
+
+(extern in_bounds [int int] int)
+
+// Draw a filled cell at (col, row) with given color index
+(pub draw_cell (fn [(col int) (row int) (ci int)] void
+  (SDL_SetRenderDrawColor renderer CR[ci] CG[ci] CB[ci] 255)
+  (set rc[0] (+ (* col CS) (<< (* row CS) 32)))
+  (set rc[1] (+ CS (<< CS 32)))
+  (SDL_RenderFillRect renderer (& rc))))
+
+// Draw the locked board cells
+(pub draw_board (fn [] void
+  (let dr int 0)
+  (while (< dr ROWS)
+    (begin
+      (let dc int 0)
+      (while (< dc COLS)
+        (begin
+          (let cv int board[(+ (* dr COLS) dc)])
+          (if (> cv 0) (draw_cell dc dr (- cv 1)))
+          (set dc (+ dc 1))
+        ))
+      (set dr (+ dr 1))))))
+
+// Draw the currently falling piece
+(pub draw_piece (fn [] void
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (if (in_bounds cx[_i] cy[_i])
+        (draw_cell cx[_i] cy[_i] pk))
+      (set _i (+ _i 1))))))
+
+// Draw grid lines
+(pub draw_grid (fn [] void
+  (SDL_SetRenderDrawColor renderer 50 50 50 255)
+  (let gl int 0)
+  (while (<= gl COLS)
+    (begin
+      (set rc[0] (+ (* gl CS) 0))
+      (set rc[1] (+ 1 (<< WH 32)))
+      (SDL_RenderFillRect renderer (& rc))
+      (set gl (+ gl 1))))
+  (let gh int 0)
+  (while (<= gh ROWS)
+    (begin
+      (set rc[0] (+ 0 (<< (* gh CS) 32)))
+      (set rc[1] (+ WW (<< 1 32)))
+      (SDL_RenderFillRect renderer (& rc))
+      (set gh (+ gh 1))))))
+
+// Full frame render
+(pub render_frame (fn [] void
+  (SDL_PumpEvents)
+  (SDL_SetRenderDrawColor renderer 30 30 30 255)
+  (SDL_RenderClear renderer)
+  (draw_board)
+  (draw_piece)
+  (draw_grid)
+  (SDL_RenderPresent renderer)))
+
+// Draw game-over overlay
+(pub draw_game_over (fn [] void
+  (SDL_SetRenderDrawColor renderer 0 0 0 200)
+  (set rc[0] 0)
+  (set rc[1] (+ WW (<< WH 32)))
+  (SDL_RenderFillRect renderer (& rc))
+  (SDL_RenderPresent renderer)))
