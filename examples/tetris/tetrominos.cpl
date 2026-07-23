@@ -1,6 +1,11 @@
 // tetrominos.cpl — Game state and helper functions
 (extern COLS int)
 (extern ROWS int)
+(extern KE int)
+(extern KL int)
+(extern KR int)
+(extern KD int)
+(extern KU int)
 (extern SH int[224])
 
 // State
@@ -140,12 +145,6 @@
 
 // Helper: handle key press
 (pub handle_key (fn [(kc int)] void
-  (extern KE int)
-  (extern KL int)
-  (extern KR int)
-  (extern KD int)
-  (extern KU int)
-  (extern SH int[224])
   (if (= kc KE) (set over 1))
   (if (= kc KL) (try_move -1 0))
   (if (= kc KR) (try_move 1 0))

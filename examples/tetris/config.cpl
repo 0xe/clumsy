@@ -1,18 +1,4 @@
-// config.cpl — SDL externs, constants, colors, shapes
-(extern SDL_Init [int] int)
-(extern SDL_CreateWindow [(* char) int int int int int] (* void))
-(extern SDL_CreateRenderer [(* void) int int] (* void))
-(extern SDL_SetRenderDrawColor [(* void) int int int int] int)
-(extern SDL_RenderClear [(* void)] int)
-(extern SDL_RenderPresent [(* void)] void)
-(extern SDL_RenderFillRect [(* void) (* void)] int)
-(extern SDL_PollEvent [(* void)] int)
-(extern SDL_PumpEvents [] void)
-(extern SDL_DestroyRenderer [(* void)] void)
-(extern SDL_DestroyWindow [(* void)] void)
-(extern SDL_Delay [int] void)
-(extern SDL_Quit [] void)
-(extern printf [(* char) int] int)
+// config.cpl — constants, colors, shapes
 
 (pub COLS int 10)
 (pub ROWS int 20)
