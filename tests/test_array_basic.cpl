@@ -1,5 +1,7 @@
-(let arr int[4] [1 2 3 4])
-(print arr[0])
-(print arr[1])
-(print arr[2])
-(print arr[3])
+(pub main (fn [] int
+  (let arr int[4] [1 2 3 4])
+  (print arr[0])
+  (print arr[1])
+  (print arr[2])
+  (print arr[3])
+  (ret 0)))

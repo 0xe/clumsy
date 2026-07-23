@@ -1,0 +1,171 @@
+// tetrominos.cpl — Game state and helper functions
+(extern COLS int)
+(extern ROWS int)
+(extern SH int[224])
+
+// State
+(pub window (* void) 0)
+(pub renderer (* void) 0)
+(pub board int[200] [0])
+(pub pk int 0)
+(pub pr int 0)
+(pub ppx int 0)
+(pub ppy int 0)
+(pub score int 0)
+(pub over int 0)
+(pub timer int 0)
+(pub ev int[7] [0])
+(pub rc int[2] [0])
+
+// Cell positions
+(pub cx int[4] [0 0 0 0])
+(pub cy int[4] [0 0 0 0])
+
+// Temp vars
+(pub base int 0)
+(pub _i int 0)
+(pub _ok int 0)
+(pub _nx int 0)
+(pub _ny int 0)
+
+// Helper: check if position is blocked (out of bounds or occupied)
+(pub blocked (fn [(x int) (y int)] int
+  (if (|| (< x 0) (|| (>= x COLS) (|| (< y 0) (>= y ROWS))))
+    (ret 1)
+    (if (> board[(+ (* y COLS) x)] 0) (ret 1) (ret 0)))))
+
+// Helper: check if position is in bounds
+(pub in_bounds (fn [(x int) (y int)] int
+  (ret (&& (&& (>= x 0) (< x COLS)) (&& (>= y 0) (< y ROWS))))))
+
+// Helper: move piece by dx, dy if not blocked
+(pub try_move (fn [(dx int) (dy int)] int
+  (set _ok 1)
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (set _nx (+ cx[_i] dx))
+      (set _ny (+ cy[_i] dy))
+      (if (blocked _nx _ny) (set _ok 0))
+      (set _i (+ _i 1))
+    ))
+  (if (= _ok 0) (ret 0))
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (set cx[_i] (+ cx[_i] dx))
+      (set cy[_i] (+ cy[_i] dy))
+      (set _i (+ _i 1))
+    ))
+  (set ppx (+ ppx dx))
+  (set ppy (+ ppy dy))
+  (ret 1)))
+
+// Helper: update cell positions from ppx/ppy and shape data
+(pub update_cells (fn [] void
+  (set base (+ (* pk 32) (* pr 8)))
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (set cx[_i] (+ ppx SH[(+ base (* _i 2))]))
+      (set cy[_i] (+ ppy SH[(+ base (+ (* _i 2) 1))]))
+      (set _i (+ _i 1))
+    ))))
+
+// Helper: spawn new piece
+(pub spawn (fn [] void
+  (set pk (% (+ score timer) 7))
+  (set pr 0)
+  (set ppx 3)
+  (set ppy 0)
+  (update_cells)))
+
+// Helper: lock piece to board
+(pub lock (fn [] void
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (if (in_bounds cx[_i] cy[_i])
+        (set board[(+ (* cy[_i] COLS) cx[_i])] (+ pk 1)))
+      (set _i (+ _i 1))
+    ))))
+
+// Helper: clear completed lines, return number cleared
+(pub clear_lines (fn [] int
+  (let cleared int 0)
+  (let ri int (- ROWS 1))
+  (while (>= ri 0)
+    (begin
+      (let full int 1)
+      (let ci2 int 0)
+      (while (< ci2 COLS)
+        (begin
+          (if (= board[(+ (* ri COLS) ci2)] 0) (set full 0))
+          (set ci2 (+ ci2 1))
+        ))
+      (if (= full 1)
+        (begin
+          (set cleared (+ cleared 1))
+          (let si int (- ri 1))
+          (while (>= si 0)
+            (begin
+              (let sc int 0)
+              (while (< sc COLS)
+                (begin
+                  (set board[(+ (* (+ si 1) COLS) sc)] board[(+ (* si COLS) sc)])
+                  (set sc (+ sc 1))
+                ))
+              (set si (- si 1))
+            ))
+          (let tc int 0)
+          (while (< tc COLS)
+            (begin
+              (set board[tc] 0)
+              (set tc (+ tc 1))
+            ))
+        ))
+      (set ri (- ri 1))
+    ))
+  (ret cleared)))
+
+// Helper: check if game over (spawned piece overlaps)
+(pub check_game_over (fn [] int
+  (set _i 0)
+  (while (< _i 4)
+    (begin
+      (if (blocked cx[_i] cy[_i]) (ret 1))
+      (set _i (+ _i 1))
+    ))
+  (ret 0)))
+
+// Helper: handle key press
+(pub handle_key (fn [(kc int)] void
+  (extern KE int)
+  (extern KL int)
+  (extern KR int)
+  (extern KD int)
+  (extern KU int)
+  (extern SH int[224])
+  (if (= kc KE) (set over 1))
+  (if (= kc KL) (try_move -1 0))
+  (if (= kc KR) (try_move 1 0))
+  (if (= kc KD) (try_move 0 1))
+  (if (= kc KU)
+    (begin
+      (let nr (% (+ pr 1) 4))
+      (set _ok 1)
+      (set _i 0)
+      (let nbase (+ (* pk 32) (* nr 8)))
+      (while (< _i 4)
+        (begin
+          (set _nx (+ ppx SH[(+ nbase (* _i 2))]))
+          (set _ny (+ ppy SH[(+ nbase (+ (* _i 2) 1))]))
+          (if (blocked _nx _ny) (set _ok 0))
+          (set _i (+ _i 1))
+        ))
+      (if (= _ok 1)
+        (begin
+          (set pr nr)
+          (update_cells)
+        ))
+    )))

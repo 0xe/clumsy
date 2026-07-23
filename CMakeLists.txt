@@ -73,7 +73,7 @@ foreach(example_dir ${EXAMPLE_SUBDIRS})
 
     # Determine link libs based on directory name
     set(EXTRA_LINK_LIBS "")
-    if(${example_name} MATCHES "^(tcp)$")
+    if(${example_name} MATCHES "^tcp")
         set(EXTRA_LINK_LIBS "-L/opt/homebrew/lib -lSDL2 -lSDL2_net")
     elseif(${example_name} MATCHES "^(sdl|tetris)$")
         set(EXTRA_LINK_LIBS "-L/opt/homebrew/lib -lSDL2")
@@ -82,9 +82,9 @@ foreach(example_dir ${EXAMPLE_SUBDIRS})
     add_custom_target(build-${example_name}
         COMMAND ${CMAKE_COMMAND}
             -DCOMPILER=$<TARGET_FILE:clumsyc>
-            -DEXAMPLE_FILES=${CPL_FILES}
-            -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
-            -DLINK_LIBS=${EXTRA_LINK_LIBS}
+            -DEXAMPLE_DIR=${example_dir}
+            "-DTMP_DIR=${CMAKE_BINARY_DIR}/tmp"
+            "-DLINK_LIBS=${EXTRA_LINK_LIBS}"
             -P ${CMAKE_SOURCE_DIR}/example_runner.cmake
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
         DEPENDS clumsyc

@@ -2,4 +2,6 @@
 
 (extern puts [*char] int)
 
-(puts "Hello")
+(pub main (fn [] int
+  (puts "Hello")
+  (ret 0)))

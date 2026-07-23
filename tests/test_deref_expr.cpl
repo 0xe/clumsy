@@ -1,4 +1,6 @@
 // Test deref in expression context
-(let x int 42)
-(let ptr (* int) (& x))
-(print (* ptr))
+(pub main (fn [] int
+  (let x int 42)
+  (let ptr (* int) (& x))
+  (print (* ptr))
+  (ret 0)))

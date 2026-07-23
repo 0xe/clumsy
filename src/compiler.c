@@ -110,27 +110,71 @@ static void collect_symbols_from_stmt(ASTNode *stmt, SymbolTable *table) {
 
     if (stmt->type == AST_EXTERN_DECL) {
         ASTNode *name_node = stmt->data.list.children[0];
-        ASTNode *params_node = stmt->data.list.children[1];
 
-        Symbol symbol;
+        Symbol symbol = {0};
         symbol.name = strdup(name_node->data.string_value);
-        symbol.type = SYM_C_FUNCTION;
         symbol.is_external = true;
+        symbol.is_public = false;
+        symbol.is_global = true;
         symbol.c_library = NULL;
-        symbol.type_info.c_function.c_name = strdup(name_node->data.string_value);
-        symbol.type_info.c_function.return_type = SYM_INT;
-        symbol.type_info.c_function.param_count = params_node->data.list.count;
         symbol.init_value = NULL;
+
+        // Determine if this is a function extern or variable extern
+        // Function extern: (extern name [(params)] return_type) — 3+ children
+        // Variable extern: (extern name type) — 2 children
+        if (stmt->data.list.count >= 3) {
+            // Function extern
+            ASTNode *params_node = stmt->data.list.children[1];
+            symbol.type = SYM_C_FUNCTION;
+            symbol.type_info.c_function.c_name = strdup(name_node->data.string_value);
+            symbol.type_info.c_function.return_type = SYM_INT;
+            symbol.type_info.c_function.param_count = params_node->data.list.count;
+        } else {
+            // Variable extern: (extern name type)
+            symbol.type = SYM_INT;  // default
+            if (stmt->data.list.count >= 2) {
+                ASTNode *type_node = stmt->data.list.children[1];
+                if (type_node->type == AST_IDENTIFIER) {
+                    if (strcmp(type_node->data.string_value, "int") == 0) {
+                        symbol.type = SYM_INT;
+                    } else if (strcmp(type_node->data.string_value, "str") == 0) {
+                        symbol.type = SYM_STR;
+                    } else if (strcmp(type_node->data.string_value, "char") == 0) {
+                        symbol.type = SYM_CHAR;
+                    }
+                } else if (type_node->type == AST_LIST && type_node->data.list.count >= 2) {
+                    ASTNode *type_op = type_node->data.list.children[0];
+                    if (type_op->type == AST_IDENTIFIER && strcmp(type_op->data.string_value, "*") == 0) {
+                        symbol.type = SYM_POINTER;
+                    } else if (type_op->type == AST_IDENTIFIER && 
+                               (strcmp(type_op->data.string_value, "[]") == 0 ||
+                                strcmp(type_op->data.string_value, "array_type") == 0)) {
+                        symbol.type = SYM_ARRAY;
+                        if (type_node->data.list.count >= 3) {
+                            ASTNode *size_node = type_node->data.list.children[2];
+                            if (size_node->type == AST_INT) {
+                                symbol.type_info.array.size = size_node->data.int_value;
+                            }
+                        }
+                    }
+                }
+            }
+        }
         add_symbol(table, symbol);
     } else if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
         ASTNode *op = stmt->data.list.children[0];
 
-        if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
+        if (op->type == AST_IDENTIFIER && (strcmp(op->data.string_value, "let") == 0 ||
+                                          strcmp(op->data.string_value, "pub") == 0)) {
+            bool is_pub = (strcmp(op->data.string_value, "pub") == 0);
             ASTNode *name_node = stmt->data.list.children[1];
             
             if (name_node->type == AST_IDENTIFIER) {
-                Symbol symbol;
+                Symbol symbol = {0};
                 symbol.name = strdup(name_node->data.string_value);
+                symbol.is_public = is_pub;
+                symbol.is_external = false;
+                symbol.is_global = (table->parent == NULL);  // top-level = global
                 
                 if (stmt->data.list.count == 3) {
                     symbol.type = SYM_INT;
@@ -297,8 +341,10 @@ void add_symbol(SymbolTable *table, Symbol symbol) {
             exit(1);
         }
     }
-    // Assign stack offset for non-function symbols
-    if (symbol.type != SYM_FUNCTION && symbol.type != SYM_C_FUNCTION) {
+    // Global/extern variables live in .data, not on the stack
+    if (symbol.is_global || symbol.is_external) {
+        symbol.stack_offset = -1;
+    } else if (symbol.type != SYM_FUNCTION && symbol.type != SYM_C_FUNCTION) {
         symbol.stack_offset = table->next_offset;
         table->next_offset += symbol_stack_size(&symbol);
     } else {
@@ -319,11 +365,14 @@ Symbol *find_symbol(SymbolTable *table, const char *name) {
 static int total_scope_size(SymbolTable *table) {
     int size = 0;
     for (size_t i = 0; i < table->count; i++) {
-        if (table->symbols[i].type == SYM_FUNCTION ||
-            table->symbols[i].type == SYM_C_FUNCTION) {
+        Symbol *sym = &table->symbols[i];
+        if (sym->type == SYM_FUNCTION || sym->type == SYM_C_FUNCTION) {
             continue;
         }
-        size += symbol_stack_size(&table->symbols[i]);
+        if (sym->is_global || sym->is_external) {
+            continue;
+        }
+        size += symbol_stack_size(sym);
     }
     return size;
 }
@@ -387,6 +436,10 @@ Symbol *find_symbol_recursive(SymbolTable *table, const char *name) {
 
 bool uses_exponentiation(ASTNode *node) {
     if (!node) return false;
+    
+    if (node->type == AST_FN) {
+        return uses_exponentiation(node->data.fn.body);
+    }
     
     if (node->type == AST_LIST && node->data.list.count > 0) {
         // Check if this is an exponentiation operation
@@ -496,6 +549,16 @@ void emit_pop_call_frame(CodeGen *codegen) {
 }
 
 void emit_load_variable(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols) {
+    // Check if this is a global variable
+    Symbol *sym = find_symbol_recursive(symbols, var_name);
+    if (sym && sym->is_global) {
+        // Global variable: use adrp/add to load from .data section
+        emit_code(codegen, "    adrp  x9, _%s@PAGE\n", var_name);
+        emit_code(codegen, "    add   x9, x9, _%s@PAGEOFF\n", var_name);
+        emit_code(codegen, "    ldr   %s, [x9]\n", reg);
+        return;
+    }
+    
     int offset = get_symbol_offset(symbols, var_name);
     if (offset >= 0) {
         emit_code(codegen, "    ldr   %s, [sp, #%d]\n", reg, offset + codegen->sp_displacement);
@@ -506,6 +569,16 @@ void emit_load_variable(CodeGen *codegen, const char *reg, const char *var_name,
 }
 
 void emit_store_variable(CodeGen *codegen, const char *reg, const char *var_name, SymbolTable *symbols) {
+    // Check if this is a global variable
+    Symbol *sym = find_symbol_recursive(symbols, var_name);
+    if (sym && sym->is_global) {
+        // Global variable: use adrp/add to store to .data section
+        emit_code(codegen, "    adrp  x9, _%s@PAGE\n", var_name);
+        emit_code(codegen, "    add   x9, x9, _%s@PAGEOFF\n", var_name);
+        emit_code(codegen, "    str   %s, [x9]\n", reg);
+        return;
+    }
+    
     int offset = get_symbol_offset(symbols, var_name);
     if (offset >= 0) {
         emit_code(codegen, "    str   %s, [sp, #%d]\n", reg, offset + codegen->sp_displacement);
@@ -803,12 +876,19 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                         else if (strcmp(op->data.string_value, "&") == 0 && expr->data.list.count == 2) {
                             ASTNode *operand = expr->data.list.children[1];
                             if (operand->type == AST_IDENTIFIER) {
-                                int offset = get_symbol_offset(symbols, operand->data.string_value);
-                                if (offset >= 0) {
-                                    emit_code(codegen, "    mov   x0, sp\n");
-                                    emit_code(codegen, "    add   x0, x0, #%d\n", offset + codegen->sp_displacement);
+                                Symbol *sym = find_symbol_recursive(symbols, operand->data.string_value);
+                                if (sym && (sym->is_global || sym->is_external)) {
+                                    // Global variable: address via adrp/add
+                                    emit_code(codegen, "    adrp  x0, _%s@PAGE\n", operand->data.string_value);
+                                    emit_code(codegen, "    add   x0, x0, _%s@PAGEOFF\n", operand->data.string_value);
                                 } else {
-                                    emit_mov_immediate(codegen, "x0", 0);
+                                    int offset = get_symbol_offset(symbols, operand->data.string_value);
+                                    if (offset >= 0) {
+                                        emit_code(codegen, "    mov   x0, sp\n");
+                                        emit_code(codegen, "    add   x0, x0, #%d\n", offset + codegen->sp_displacement);
+                                    } else {
+                                        emit_mov_immediate(codegen, "x0", 0);
+                                    }
                                 }
                             } else {
                                 emit_mov_immediate(codegen, "x0", 0);
@@ -836,36 +916,56 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                             ASTNode *index = expr->data.list.children[2];
                             
                             if (array_var->type == AST_IDENTIFIER) {
-                                // Get the base offset of the array
-                                int array_offset = get_symbol_offset(symbols, array_var->data.string_value);
+                                Symbol *sym = find_symbol_recursive(symbols, array_var->data.string_value);
                                 
-                                if (array_offset >= 0) {
-                                    // Calculate element offset based on index
-                                    int element_offset = 0;
+                                if (sym && (sym->is_global || sym->is_external)) {
+                                    // Global array: compute index first, then load base
                                     if (index->type == AST_INT) {
-                                        // Static index - calculate offset directly
-                                        element_offset = index->data.int_value * 8;  // 8 bytes per element
-                                        emit_code(codegen, "    ldr   x0, [sp, #%d]\n", array_offset + element_offset + codegen->sp_displacement);
+                                        int element_offset = index->data.int_value * 8;
+                                        emit_code(codegen, "    adrp  x9, _%s@PAGE\n", array_var->data.string_value);
+                                        emit_code(codegen, "    add   x9, x9, _%s@PAGEOFF\n", array_var->data.string_value);
+                                        emit_code(codegen, "    ldr   x0, [x9, #%d]\n", element_offset);
                                     } else {
-                                        // Dynamic index - need to calculate at runtime
-                                        // Load index into x1
+                                        // Compute index into x1 first
                                         if (index->type == AST_IDENTIFIER) {
                                             emit_load_variable(codegen, "x1", index->data.string_value, symbols);
                                         } else {
                                             generate_expression(codegen, index, symbols);
                                             emit_code(codegen, "    mov   x1, x0\n");
                                         }
-                                        
-                                        // Calculate element address: base + (index * 8)
-                                        emit_code(codegen, "    mov   x9, #8\n");
-                                        emit_code(codegen, "    mul   x1, x1, x9\n");
-                                        emit_code(codegen, "    mov   x9, sp\n");
-                                        emit_code(codegen, "    add   x9, x9, #%d\n", array_offset + codegen->sp_displacement);
+                                        // Now load base address (safe, index is already in x1)
+                                        emit_code(codegen, "    adrp  x9, _%s@PAGE\n", array_var->data.string_value);
+                                        emit_code(codegen, "    add   x9, x9, _%s@PAGEOFF\n", array_var->data.string_value);
+                                        emit_code(codegen, "    mov   x10, #8\n");
+                                        emit_code(codegen, "    mul   x1, x1, x10\n");
                                         emit_code(codegen, "    add   x9, x9, x1\n");
                                         emit_code(codegen, "    ldr   x0, [x9]\n");
                                     }
                                 } else {
-                                    emit_mov_immediate(codegen, "x0", 0);
+                                    // Local stack array
+                                    int array_offset = get_symbol_offset(symbols, array_var->data.string_value);
+                                    
+                                    if (array_offset >= 0) {
+                                        if (index->type == AST_INT) {
+                                            int element_offset = index->data.int_value * 8;
+                                            emit_code(codegen, "    ldr   x0, [sp, #%d]\n", array_offset + element_offset + codegen->sp_displacement);
+                                        } else {
+                                            if (index->type == AST_IDENTIFIER) {
+                                                emit_load_variable(codegen, "x1", index->data.string_value, symbols);
+                                            } else {
+                                                generate_expression(codegen, index, symbols);
+                                                emit_code(codegen, "    mov   x1, x0\n");
+                                            }
+                                            emit_code(codegen, "    mov   x9, #8\n");
+                                            emit_code(codegen, "    mul   x1, x1, x9\n");
+                                            emit_code(codegen, "    mov   x9, sp\n");
+                                            emit_code(codegen, "    add   x9, x9, #%d\n", array_offset + codegen->sp_displacement);
+                                            emit_code(codegen, "    add   x9, x9, x1\n");
+                                            emit_code(codegen, "    ldr   x0, [x9]\n");
+                                        }
+                                    } else {
+                                        emit_mov_immediate(codegen, "x0", 0);
+                                    }
                                 }
                             }
                         }
@@ -1167,27 +1267,55 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                     ASTNode *array_var = name_node->data.list.children[1];
                     ASTNode *index = name_node->data.list.children[2];
                     
-                    int array_offset = get_symbol_offset(symbols, array_var->data.string_value);
+                    Symbol *arr_sym = find_symbol_recursive(symbols, array_var->data.string_value);
                     
-                    if (index->type == AST_INT) {
-                        emit_code(codegen, "    str   x0, [sp, #%d]\n", array_offset + index->data.int_value * 8 + codegen->sp_displacement);
-                    } else {
-                        // Dynamic index: save value, compute address, store
-                        emit_code(codegen, "    mov   x10, x0\n");
-                        
-                        if (index->type == AST_IDENTIFIER) {
-                            emit_load_variable(codegen, "x1", index->data.string_value, symbols);
+                    if (arr_sym && (arr_sym->is_global || arr_sym->is_external)) {
+                        // Global array store: compute index first, then load base
+                        if (index->type == AST_INT) {
+                            emit_code(codegen, "    adrp  x9, _%s@PAGE\n", array_var->data.string_value);
+                            emit_code(codegen, "    add   x9, x9, _%s@PAGEOFF\n", array_var->data.string_value);
+                            emit_code(codegen, "    str   x0, [x9, #%d]\n", index->data.int_value * 8);
                         } else {
-                            generate_expression(codegen, index, symbols);
-                            emit_code(codegen, "    mov   x1, x0\n");
+                            // Save value to store
+                            emit_code(codegen, "    mov   x10, x0\n");
+                            // Compute index into x1 first
+                            if (index->type == AST_IDENTIFIER) {
+                                emit_load_variable(codegen, "x1", index->data.string_value, symbols);
+                            } else {
+                                generate_expression(codegen, index, symbols);
+                                emit_code(codegen, "    mov   x1, x0\n");
+                            }
+                            // Now load base address (safe, index is in x1, value in x10)
+                            emit_code(codegen, "    adrp  x9, _%s@PAGE\n", array_var->data.string_value);
+                            emit_code(codegen, "    add   x9, x9, _%s@PAGEOFF\n", array_var->data.string_value);
+                            emit_code(codegen, "    mov   x11, #8\n");
+                            emit_code(codegen, "    mul   x1, x1, x11\n");
+                            emit_code(codegen, "    add   x9, x9, x1\n");
+                            emit_code(codegen, "    str   x10, [x9]\n");
                         }
+                    } else {
+                        // Local stack array store
+                        int array_offset = get_symbol_offset(symbols, array_var->data.string_value);
                         
-                        emit_code(codegen, "    mov   x9, #8\n");
-                        emit_code(codegen, "    mul   x1, x1, x9\n");
-                        emit_code(codegen, "    mov   x9, sp\n");
-                        emit_code(codegen, "    add   x9, x9, #%d\n", array_offset + codegen->sp_displacement);
-                        emit_code(codegen, "    add   x9, x9, x1\n");
-                        emit_code(codegen, "    str   x10, [x9]\n");
+                        if (index->type == AST_INT) {
+                            emit_code(codegen, "    str   x0, [sp, #%d]\n", array_offset + index->data.int_value * 8 + codegen->sp_displacement);
+                        } else {
+                            emit_code(codegen, "    mov   x10, x0\n");
+                            
+                            if (index->type == AST_IDENTIFIER) {
+                                emit_load_variable(codegen, "x1", index->data.string_value, symbols);
+                            } else {
+                                generate_expression(codegen, index, symbols);
+                                emit_code(codegen, "    mov   x1, x0\n");
+                            }
+                            
+                            emit_code(codegen, "    mov   x9, #8\n");
+                            emit_code(codegen, "    mul   x1, x1, x9\n");
+                            emit_code(codegen, "    mov   x9, sp\n");
+                            emit_code(codegen, "    add   x9, x9, #%d\n", array_offset + codegen->sp_displacement);
+                            emit_code(codegen, "    add   x9, x9, x1\n");
+                            emit_code(codegen, "    str   x10, [x9]\n");
+                        }
                     }
                     return;
                 }
@@ -1357,9 +1485,11 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
     }
 }
 
-void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNode *fn_node, SymbolTable *symbols) {
+void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNode *fn_node, SymbolTable *symbols, bool is_public) {
     // Generate function label with .globl for cross-file linking (macOS ABI: _ prefix)
-    emit_code(codegen, ".globl _%s\n", func_name);
+    if (is_public) {
+        emit_code(codegen, ".globl _%s\n", func_name);
+    }
     emit_code(codegen, "_%s:\n", func_name);
     
     // Setup frame
@@ -1423,7 +1553,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                         reg_index += 2; // Struct uses 2 registers
                         
                         // Add struct symbol to function symbol table
-                        Symbol symbol;
+                        Symbol symbol = {0};
                         symbol.name = strdup(param_name);
                         symbol.type = SYM_STRUCT;
                         add_symbol(func_symbols, symbol);
@@ -1432,7 +1562,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                         reg_index += 4; // Array uses 4 registers
                         
                         // Add array symbol to function symbol table
-                        Symbol symbol;
+                        Symbol symbol = {0};
                         symbol.name = strdup(param_name);
                         symbol.type = SYM_ARRAY;
                         add_symbol(func_symbols, symbol);
@@ -1441,7 +1571,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                         reg_index++;
                         
                         // Add to function symbol table
-                        Symbol symbol;
+                        Symbol symbol = {0};
                         symbol.name = strdup(param_name);
                         symbol.type = SYM_INT; // Default to int
                         add_symbol(func_symbols, symbol);
@@ -1573,110 +1703,6 @@ bool is_function_call(ASTNode *node, SymbolTable *symbols) {
     return false;
 }
 
-void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols) {
-    // Generate main function
-    emit_code(codegen, "_main:\n");
-    
-    // Setup frame pointer
-    emit_code(codegen, "    stp   x29, x30, [sp, #-16]!\n");
-    emit_code(codegen, "    mov   x29, sp\n");
-    
-    // Calculate stack space needed (functions don't get stack slots)
-    int stack_space = total_tree_size(symbols);
-    // Reserve 128 bytes of scratch space for binary expression spills
-    codegen->scratch_offset = stack_space;
-    stack_space += 128;
-    if (stack_space % 16 != 0) {
-        stack_space += 16 - (stack_space % 16);
-    }
-    
-    // Allocate stack space
-    if (stack_space > 0) {
-        if (stack_space <= 4095) {
-            emit_code(codegen, "    sub   sp, sp, #%d\n", stack_space);
-        } else {
-            emit_mov_immediate(codegen, "x9", stack_space);
-            emit_code(codegen, "    sub   sp, sp, x9\n");
-        }
-    }
-    
-    // Set up epilogue label for ret statements
-    char *epilogue_label = new_label(codegen, "epilogue");
-    char *prev_epilogue = codegen->current_epilogue_label;
-    codegen->current_epilogue_label = epilogue_label;
-    
-// Generate code for each statement (skip function definitions)
-    // Also find the final expression to use as exit code
-    ASTNode *final_expr = NULL;
-    if (ast->type == AST_LIST) {
-        // Process all statements in order
-        for (size_t i = 0; i < ast->data.list.count; i++) {
-            ASTNode *stmt = ast->data.list.children[i];
-            
-            // Skip function definitions - they were already generated above
-            bool is_function_def = false;
-            if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
-                ASTNode *op = stmt->data.list.children[0];
-                
-                if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
-                    ASTNode *init_value = (stmt->data.list.count >= 4) ? stmt->data.list.children[3] : 
-                                          (stmt->data.list.count == 3) ? stmt->data.list.children[2] : NULL;
-                    if (init_value && init_value->type == AST_FN) {
-                        is_function_def = true;
-                    }
-                }
-            }
-            
-            if (!is_function_def) {
-                generate_statement(codegen, stmt, symbols);
-                // If this is not a statement (no operator), it's an expression for exit code
-                // BUT don't use function calls as final expressions since they don't return meaningful exit codes
-                if (stmt->type == AST_IDENTIFIER || stmt->type == AST_INT || 
-                    (stmt->type == AST_LIST && stmt->data.list.count > 0 && 
-                     stmt->data.list.children[0]->type == AST_IDENTIFIER &&
-                     (strcmp(stmt->data.list.children[0]->data.string_value, "let") != 0 &&
-                      strcmp(stmt->data.list.children[0]->data.string_value, "set") != 0 &&
-                      strcmp(stmt->data.list.children[0]->data.string_value, "print") != 0 &&
-                      strcmp(stmt->data.list.children[0]->data.string_value, "if") != 0 &&
-                       strcmp(stmt->data.list.children[0]->data.string_value, "while") != 0 &&
-                       strcmp(stmt->data.list.children[0]->data.string_value, "begin") != 0 &&
-                       strcmp(stmt->data.list.children[0]->data.string_value, "ret") != 0 &&
-                       // EXCLUDE function calls from being final expressions
-                       !is_function_call(stmt, symbols)))) {
-                    final_expr = stmt;
-                }
-            }
-        }
-    }
-    
-    codegen->current_epilogue_label = prev_epilogue;
-    
-    // Set exit code based on final expression or default to 0
-    // This must be BEFORE the epilogue label so ret skips it
-    if (final_expr) {
-        generate_expression(codegen, final_expr, symbols);
-    } else {
-        emit_mov_immediate(codegen, "x0", 0);
-    }
-    
-    // Emit epilogue label (jump target for ret)
-    emit_code(codegen, "%s:\n", epilogue_label);
-    
-    // Deallocate stack space
-    if (stack_space > 0) {
-        if (stack_space <= 4095) {
-            emit_code(codegen, "    add   sp, sp, #%d\n", stack_space);
-        } else {
-            emit_mov_immediate(codegen, "x9", stack_space);
-            emit_code(codegen, "    add   sp, sp, x9\n");
-        }
-    }
-    
-    // Restore frame pointer and return address, then exit
-    emit_code(codegen, "    ldp   x29, x30, [sp], #16\n");
-    emit_code(codegen, "    ret\n");
-}
-
 char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *struct_types) {
     CodeGen *codegen = create_codegen();
     
@@ -1692,6 +1718,23 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *stru
         generate_pow_function(codegen);
     }
     
+    // Process top-level struct definitions first (needed for struct type table)
+    if (ast->type == AST_LIST) {
+        for (size_t i = 0; i < ast->data.list.count; i++) {
+            ASTNode *stmt = ast->data.list.children[i];
+            if (stmt->type == AST_LIST && stmt->data.list.count >= 4) {
+                ASTNode *op = stmt->data.list.children[0];
+                if (op->type == AST_IDENTIFIER && (strcmp(op->data.string_value, "let") == 0 ||
+                                                  strcmp(op->data.string_value, "pub") == 0)) {
+                    ASTNode *type_node = stmt->data.list.children[2];
+                    if (type_node->type == AST_IDENTIFIER && strcmp(type_node->data.string_value, "struct") == 0) {
+                        generate_statement(codegen, stmt, symbols);
+                    }
+                }
+            }
+        }
+    }
+    
 // Generate all function definitions first
     if (ast->type == AST_LIST) {
         for (size_t i = 0; i < ast->data.list.count; i++) {
@@ -1700,7 +1743,8 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *stru
             if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
                 ASTNode *op = stmt->data.list.children[0];
                 
-                if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
+                if (op->type == AST_IDENTIFIER && (strcmp(op->data.string_value, "let") == 0 ||
+                                                  strcmp(op->data.string_value, "pub") == 0)) {
                     ASTNode *name_node = stmt->data.list.children[1];
                     
                     // Check different let statement formats:
@@ -1715,34 +1759,81 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *stru
                     
                     // Check if this is a function definition
                     if (init_value && init_value->type == AST_FN) {
-                        generate_function_definition(codegen, name_node->data.string_value, init_value, symbols);
+                        bool is_pub = (strcmp(op->data.string_value, "pub") == 0);
+                        generate_function_definition(codegen, name_node->data.string_value, init_value, symbols, is_pub);
                     }
                 }
             }
         }
     }
     
-    // Check if file has any top-level executable code (not just function defs / extern decls)
-    bool has_top_level_code = false;
+    // Generate .data section for global variables
     if (ast->type == AST_LIST) {
+        bool data_section_open = false;
         for (size_t i = 0; i < ast->data.list.count; i++) {
             ASTNode *stmt = ast->data.list.children[i];
-            if (stmt->type == AST_LIST && stmt->data.list.count >= 3) {
+            if (stmt->type == AST_LIST && stmt->data.list.count >= 4) {
                 ASTNode *op = stmt->data.list.children[0];
-                if (op->type == AST_IDENTIFIER && strcmp(op->data.string_value, "let") == 0) {
-                    ASTNode *init_value = (stmt->data.list.count >= 4) ? stmt->data.list.children[3] :
-                                          (stmt->data.list.count == 3) ? stmt->data.list.children[2] : NULL;
-                    if (init_value && init_value->type == AST_FN) continue;
+                if (op->type == AST_IDENTIFIER && (strcmp(op->data.string_value, "let") == 0 ||
+                                                  strcmp(op->data.string_value, "pub") == 0)) {
+                    ASTNode *name_node = stmt->data.list.children[1];
+                    ASTNode *type_node = stmt->data.list.children[2];
+                    ASTNode *init_value = stmt->data.list.children[3];
+                    
+                    // Skip function definitions (handled above)
+                    if (init_value->type == AST_FN) continue;
+                    
+                    // Skip struct type definitions
+                    if (type_node->type == AST_IDENTIFIER && strcmp(type_node->data.string_value, "struct") == 0) continue;
+                    
+                    // This is a global variable
+                    if (!data_section_open) {
+                        emit_code(codegen, "\n    .data\n");
+                        data_section_open = true;
+                    }
+                    
+                    bool is_pub = (strcmp(op->data.string_value, "pub") == 0);
+                    if (is_pub) {
+                        emit_code(codegen, ".globl _%s\n", name_node->data.string_value);
+                    }
+                    emit_code(codegen, "_%s:\n", name_node->data.string_value);
+                    
+                    // Emit initial value
+                    if (init_value->type == AST_INT) {
+                        emit_code(codegen, "    .word   %d\n", init_value->data.int_value);
+                        emit_code(codegen, "    .zero   4\n");  // pad to 8 bytes
+                    } else if (init_value->type == AST_STRING) {
+                        size_t si = intern_string(codegen, init_value->data.string_value);
+                        emit_code(codegen, "    .asciz  \"%s\"\n", codegen->strings[si]);
+                    } else if (init_value->type == AST_ARRAY) {
+                        // Array initialization: emit each element as .quad
+                        for (size_t j = 0; j < init_value->data.list.count; j++) {
+                            ASTNode *elem = init_value->data.list.children[j];
+                            if (elem->type == AST_INT) {
+                                emit_code(codegen, "    .quad   %d\n", elem->data.int_value);
+                            } else {
+                                emit_code(codegen, "    .quad   0\n");
+                            }
+                        }
+                        // Zero-fill remaining elements if array type with size
+                        if (type_node->type == AST_LIST && type_node->data.list.count >= 3) {
+                            ASTNode *size_node = type_node->data.list.children[2];
+                            if (size_node->type == AST_INT) {
+                                int declared_size = size_node->data.int_value;
+                                for (size_t j = init_value->data.list.count; j < (size_t)declared_size; j++) {
+                                    emit_code(codegen, "    .quad   0\n");
+                                }
+                            }
+                        }
+                    } else {
+                        emit_code(codegen, "    .quad   0\n");
+                    }
                 }
             }
-            if (stmt->type == AST_EXTERN_DECL) continue;
-            has_top_level_code = true;
-            break;
         }
-    }
-
-    if (has_top_level_code) {
-        generate_main_function(codegen, ast, symbols);
+        if (data_section_open) {
+            emit_code(codegen, "    .text\n");
+        }
     }
     
     // Emit all collected string literals

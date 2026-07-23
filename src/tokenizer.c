@@ -2,7 +2,7 @@
 #include <ctype.h>
 
 static const char *keywords[] = {
-    "int", "str", "let", "bool", "char", "struct",
+    "int", "str", "let", "pub", "bool", "char", "struct",
     "set", "fn", "ret", "if", "else", "while",
     "break", "continue",
     "extern", "include", "null",

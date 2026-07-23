@@ -2,6 +2,8 @@
 
 (extern puts [*char] int)
 
-(puts "First call")
-(puts "Second call")
-(let x int 42)
+(pub main (fn [] int
+  (puts "First call")
+  (puts "Second call")
+  (let x int 42)
+  (ret 0)))

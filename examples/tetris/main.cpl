@@ -1,0 +1,177 @@
+// main.cpl — Entry point with game loop
+(extern COLS int)
+(extern ROWS int)
+(extern CS int)
+(extern WW int)
+(extern WH int)
+(extern DROP int)
+(extern SDL_I int)
+(extern WP int)
+(extern EQ int)
+(extern EK int)
+(extern KE int)
+(extern CR int[7])
+(extern CG int[7])
+(extern CB int[7])
+(extern SDL_Init [int] int)
+(extern SDL_CreateWindow [(* char) int int int int int] (* void))
+(extern SDL_CreateRenderer [(* void) int int] (* void))
+(extern SDL_SetRenderDrawColor [(* void) int int int int] int)
+(extern SDL_RenderClear [(* void)] int)
+(extern SDL_RenderPresent [(* void)] void)
+(extern SDL_RenderFillRect [(* void) (* void)] int)
+(extern SDL_PollEvent [(* void)] int)
+(extern SDL_PumpEvents [] void)
+(extern SDL_DestroyRenderer [(* void)] void)
+(extern SDL_DestroyWindow [(* void)] void)
+(extern SDL_Delay [int] void)
+(extern SDL_Quit [] void)
+(extern printf [(* char) int] int)
+
+(extern window (* void))
+(extern renderer (* void))
+(extern board int[200])
+(extern pk int)
+(extern pr int)
+(extern ppx int)
+(extern ppy int)
+(extern score int)
+(extern over int)
+(extern timer int)
+(extern ev int[7])
+(extern rc int[2])
+(extern cx int[4])
+(extern cy int[4])
+(extern base int)
+(extern _i int)
+(extern _ok int)
+(extern _nx int)
+(extern _ny int)
+
+(extern spawn [void] void)
+(extern lock [void] void)
+(extern clear_lines [void] int)
+(extern check_game_over [void] int)
+(extern handle_key [int] void)
+(extern try_move [int int] int)
+(extern blocked [int int] int)
+(extern in_bounds [int int] int)
+
+(pub main (fn [] int
+  (SDL_Init SDL_I)
+  (set window (SDL_CreateWindow "Clumsy Tetris" WP WP WW WH 4))
+
+  (if (= window 0)
+    (printf "No window\n")
+    (begin
+      (set renderer (SDL_CreateRenderer window -1 0))
+      (if (= renderer 0)
+        (printf "No renderer\n")
+        (begin
+          (spawn)
+
+          // GAME LOOP
+          (while (= over 0)
+            (begin
+              (set timer (+ timer 1))
+
+              // Poll events
+              (SDL_PumpEvents)
+              (let has int (SDL_PollEvent (& ev)))
+              (while (= has 1)
+                (begin
+                  (let etype (& ev[0] 0xFFFF))
+                  (if (= etype EQ) (set over 1))
+                  (if (= etype EK) (handle_key (>> ev[2] 32)))
+                  (set has (SDL_PollEvent (& ev)))
+                ))
+
+              // Gravity
+              (if (= (% timer DROP) 0)
+                (begin
+                  (if (= (try_move 0 1) 0)
+                    (begin
+                      (lock)
+                      (let cleared int (clear_lines))
+                      (set score (+ score (* cleared 10)))
+                      (spawn)
+                      (if (= (check_game_over) 0) 0 (set over 1))
+                    ))
+                ))
+
+              // Render
+              (SDL_PumpEvents)
+              (SDL_SetRenderDrawColor renderer 30 30 30 255)
+              (SDL_RenderClear renderer)
+
+              // Board cells
+              (let dr int 0)
+              (while (< dr ROWS)
+                (begin
+                  (let dc int 0)
+                  (while (< dc COLS)
+                    (begin
+                      (let cv int board[(+ (* dr COLS) dc)])
+                      (if (> cv 0)
+                        (begin
+                          (let pi int (- cv 1))
+                          (SDL_SetRenderDrawColor renderer CR[pi] CG[pi] CB[pi] 255)
+                          (set rc[0] (+ (* dc CS) (<< (* dr CS) 32)))
+                          (set rc[1] (+ CS (<< CS 32)))
+                          (SDL_RenderFillRect renderer (& rc))
+                        ))
+                      (set dc (+ dc 1))
+                    ))
+                  (set dr (+ dr 1))
+                ))
+
+              // Current piece
+              (set _i 0)
+              (while (< _i 4)
+                (begin
+                  (if (in_bounds cx[_i] cy[_i])
+                    (begin
+                      (SDL_SetRenderDrawColor renderer CR[pk] CG[pk] CB[pk] 255)
+                      (set rc[0] (+ (* cx[_i] CS) (<< (* cy[_i] CS) 32)))
+                      (set rc[1] (+ CS (<< CS 32)))
+                      (SDL_RenderFillRect renderer (& rc))
+                    ))
+                  (set _i (+ _i 1))
+                ))
+
+              // Grid
+              (SDL_SetRenderDrawColor renderer 50 50 50 255)
+              (let gl int 0)
+              (while (<= gl COLS)
+                (begin
+                  (set rc[0] (+ (* gl CS) 0))
+                  (set rc[1] (+ 1 (<< WH 32)))
+                  (SDL_RenderFillRect renderer (& rc))
+                  (set gl (+ gl 1))
+                ))
+              (let gh int 0)
+              (while (<= gh ROWS)
+                (begin
+                  (set rc[0] (+ 0 (<< (* gh CS) 32)))
+                  (set rc[1] (+ WW (<< 1 32)))
+                  (SDL_RenderFillRect renderer (& rc))
+                  (set gh (+ gh 1))
+                ))
+
+              (SDL_RenderPresent renderer)
+              (SDL_Delay 16)
+            ))
+
+          // Game over
+          (SDL_SetRenderDrawColor renderer 0 0 0 200)
+          (set rc[0] 0)
+          (set rc[1] (+ WW (<< WH 32)))
+          (SDL_RenderFillRect renderer (& rc))
+          (SDL_RenderPresent renderer)
+          (SDL_DestroyRenderer renderer)
+          (SDL_DestroyWindow window)
+          (SDL_Quit)
+          (printf "Game over! Score: %d\n" score)
+        ))
+    ))
+  (ret 0)))

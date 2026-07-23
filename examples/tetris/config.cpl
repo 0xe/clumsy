@@ -1,0 +1,47 @@
+// config.cpl — SDL externs, constants, colors, shapes
+(extern SDL_Init [int] int)
+(extern SDL_CreateWindow [(* char) int int int int int] (* void))
+(extern SDL_CreateRenderer [(* void) int int] (* void))
+(extern SDL_SetRenderDrawColor [(* void) int int int int] int)
+(extern SDL_RenderClear [(* void)] int)
+(extern SDL_RenderPresent [(* void)] void)
+(extern SDL_RenderFillRect [(* void) (* void)] int)
+(extern SDL_PollEvent [(* void)] int)
+(extern SDL_PumpEvents [] void)
+(extern SDL_DestroyRenderer [(* void)] void)
+(extern SDL_DestroyWindow [(* void)] void)
+(extern SDL_Delay [int] void)
+(extern SDL_Quit [] void)
+(extern printf [(* char) int] int)
+
+(pub COLS int 10)
+(pub ROWS int 20)
+(pub CS int 32)
+(pub WW int 320)
+(pub WH int 640)
+(pub DROP int 30)
+(pub SDL_I int 0x20)
+(pub WP int 0x1FFF0000)
+(pub EQ int 0x100)
+(pub EK int 0x300)
+(pub KL int 0x40000050)
+(pub KR int 0x4000004F)
+(pub KD int 0x40000051)
+(pub KU int 0x40000052)
+(pub KE int 0x1B)
+
+// Colors
+(pub CR int[7] [0   255 128 0   255 0   255])
+(pub CG int[7] [255 255 0   255 0   0   165])
+(pub CB int[7] [255 0   128 0   0   255 0  ])
+
+// Shapes: kind*32 + rot*8 + cell*2 = {x,y}
+(pub SH int[224] [
+  0 1 1 1 2 1 3 1   2 0 2 1 2 2 2 3   0 2 1 2 2 2 3 2   1 0 1 1 1 2 1 3
+  1 0 2 0 1 1 2 1   1 0 2 0 1 1 2 1   1 0 2 0 1 1 2 1   1 0 2 0 1 1 2 1
+  1 0 0 1 1 1 2 1   1 0 1 1 2 1 1 2   0 1 1 1 2 1 1 2   1 0 0 1 1 1 1 2
+  1 0 2 0 0 1 1 1   1 0 1 1 2 1 2 2   1 1 2 1 0 2 1 2   0 0 0 1 1 1 1 2
+  0 0 1 0 1 1 2 1   2 0 1 1 2 1 1 2   0 1 1 1 1 2 2 2   1 0 0 1 1 1 0 2
+  0 0 0 1 1 1 2 1   1 0 2 0 1 1 1 2   0 1 1 1 2 1 2 2   1 0 1 1 0 2 1 2
+  2 0 0 1 1 1 2 1   1 0 1 1 1 2 2 2   0 1 1 1 2 1 0 2   0 0 1 0 1 1 1 2
+])

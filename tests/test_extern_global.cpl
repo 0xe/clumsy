@@ -1,0 +1,28 @@
+// Test: extern variable declarations (multi-file pattern)
+// The extern declarations reference globals defined in this same file,
+// but the compiler treats them the same as cross-file externs.
+(let board int[4] [0 0 0 0])
+(let COLS int 2)
+
+(extern board int[4])
+(extern COLS int)
+
+(pub main (fn [] int
+  // Write through extern declarations
+  (set board[0] 10)
+  (set board[1] 20)
+  (set board[2] 30)
+  (set board[3] 40)
+
+  // Read back through extern declarations
+  (print board[0])
+  (print board[1])
+  (print board[2])
+  (print board[3])
+
+  // Computed index via extern
+  (let i int 1)
+  (print board[(+ (* i COLS) 0)])
+  (print board[(+ (* i COLS) 1)])
+
+  (ret 0)))

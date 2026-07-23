@@ -1,4 +1,6 @@
 // Simple test to verify C-interop works
 (extern puts [*char] int)
 
-(puts 0)
+(pub main (fn [] int
+  (puts 0)
+  (ret 0)))

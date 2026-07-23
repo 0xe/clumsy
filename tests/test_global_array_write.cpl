@@ -1,0 +1,22 @@
+// Test: global array write with static and dynamic index
+(let data int[5] [0 0 0 0 0])
+
+(pub main (fn [] int
+  // Static index writes
+  (set data[0] 11)
+  (set data[2] 33)
+  (set data[4] 55)
+
+  // Dynamic index writes
+  (let i int 1)
+  (set data[i] 22)
+  (let j int 3)
+  (set data[j] 44)
+
+  // Read back all
+  (print data[0])
+  (print data[1])
+  (print data[2])
+  (print data[3])
+  (print data[4])
+  (ret 0)))

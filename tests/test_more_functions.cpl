@@ -2,6 +2,8 @@
 (let multiply (fn [(x int) (y int)] int (ret (* x y))))
 (let square (fn [(n int)] int (ret (multiply n n))))
 
-(let result int (add 5 3))
-(let squared int (square 4))
-(print (+ result squared))
+(pub main (fn [] int
+  (let result int (add 5 3))
+  (let squared int (square 4))
+  (print (+ result squared))
+  (ret 0)))

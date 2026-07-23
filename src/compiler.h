@@ -44,7 +44,6 @@ int get_symbol_offset(SymbolTable *table, const char *name);
 
 // AST traversal and code generation
 void generate_preamble(CodeGen *codegen);
-void generate_main_function(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols);
 void generate_function_definitions(CodeGen *codegen, ASTNode *ast, SymbolTable *symbols);
 void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols);
 void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols);

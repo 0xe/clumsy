@@ -1,4 +1,6 @@
-(let x int 5)
-(if (= x 5)
-    (print 1)
-    (print 0))
+(pub main (fn [] int
+  (let x int 5)
+  (if (= x 5)
+      (print 1)
+      (print 0))
+  (ret 0)))

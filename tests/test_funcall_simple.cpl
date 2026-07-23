@@ -1,2 +1,5 @@
 (let hello (fn [] int (ret 42)))
-(print (hello))
+
+(pub main (fn [] int
+  (print (hello))
+  (ret 0)))

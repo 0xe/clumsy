@@ -1,0 +1,30 @@
+// Test: functions accessing global arrays (tetris use case)
+(let board int[9] [0 0 0 0 0 0 0 0 0])
+(let COLS int 3)
+
+(pub main (fn [] int
+  // Write via function-like pattern
+  (let r int 0)
+  (let c int 0)
+  (set board[0] 1)
+  (set board[4] 5)
+  (set board[8] 9)
+
+  // Read with computed index (r * COLS + c)
+  (print board[(+ (* r COLS) c)])
+
+  (set r 1)
+  (set c 1)
+  (print board[(+ (* r COLS) c)])
+
+  (set r 2)
+  (set c 2)
+  (print board[(+ (* r COLS) c)])
+
+  // Write with computed index
+  (set r 1)
+  (set c 0)
+  (set board[(+ (* r COLS) c)] 42)
+  (print board[3])
+
+  (ret 0)))

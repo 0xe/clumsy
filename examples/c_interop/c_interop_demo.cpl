@@ -1,22 +1,24 @@
 // C-Interop and Pointer Demo
+(pub main (fn [] int
+  // Test pointer operations
+  (let x int 42)
+  (let ptr (* int) (& x))
+  (let y int (* ptr))
+  (print "x = ")
+  (print x)
+  (print ", y = ")
+  (print y)
+  (print "\n")
 
-// Test pointer operations
-(let x int 42)
-(let ptr (* int) (& x))
-(let y int (* ptr))
-(print "x = ")
-(print x)
-(print ", y = ")
-(print y)
-(print "\n")
+  // Test C function calls
+  (extern strlen [(* char)] int)
 
-// Test C function calls
-(extern strlen [(* char)] int)
+  (let hello str "Hello, Clumsy!")
+  (let strlen_result int (strlen hello))
+  (print "String length: ")
+  (print strlen_result)
+  (print "\n")
 
-(let hello str "Hello, Clumsy!")
-(let strlen_result int (strlen hello))
-(print "String length: ")
-(print strlen_result)
-(print "\n")
-
-(print "=== All tests completed! ===\n")
+  (print "=== All tests completed! ===\n")
+  (ret 0)
+))

@@ -3,4 +3,6 @@
 
 (extern puts [*char] int)
 
-(puts "This should be called once")
+(pub main (fn [] int
+  (puts "This should be called once")
+  (ret 0)))

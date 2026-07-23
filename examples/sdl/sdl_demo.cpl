@@ -1,50 +1,52 @@
 // Simple SDL Test - opens a window, clears to cornflower blue, delays, exits
+(pub main (fn [] int
+  // Constants
+  (let SDL_INIT_VIDEO int 0x00000020)
+  (let SDL_WINDOW_SHOWN int 4)
+  (let SDL_WINDOWPOS_UNDEFINED int 0x1FFF0000)
 
-// Constants
-(let SDL_INIT_VIDEO int 0x00000020)
-(let SDL_WINDOW_SHOWN int 4)
-(let SDL_WINDOWPOS_UNDEFINED int 0x1FFF0000)
+  // Externs
+  (extern SDL_Init [int] int)
+  (extern SDL_CreateWindow [(* char) int int int int int] (* void))
+  (extern SDL_CreateRenderer [(* void) int int] (* void))
+  (extern SDL_SetRenderDrawColor [(* void) int int int int] int)
+  (extern SDL_RenderClear [(* void)] int)
+  (extern SDL_RenderPresent [(* void)] void)
+  (extern SDL_PumpEvents [] void)
+  (extern SDL_DestroyRenderer [(* void)] void)
+  (extern SDL_DestroyWindow [(* void)] void)
+  (extern SDL_Delay [int] void)
+  (extern SDL_Quit [] void)
 
-// Externs
-(extern SDL_Init [int] int)
-(extern SDL_CreateWindow [(* char) int int int int int] (* void))
-(extern SDL_CreateRenderer [(* void) int int] (* void))
-(extern SDL_SetRenderDrawColor [(* void) int int int int] int)
-(extern SDL_RenderClear [(* void)] int)
-(extern SDL_RenderPresent [(* void)] void)
-(extern SDL_PumpEvents [] void)
-(extern SDL_DestroyRenderer [(* void)] void)
-(extern SDL_DestroyWindow [(* void)] void)
-(extern SDL_Delay [int] void)
-(extern SDL_Quit [] void)
+  // State
+  (let window (* void) 0)
+  (let renderer (* void) 0)
 
-// State
-(let window (* void) 0)
-(let renderer (* void) 0)
+  (print "=== SDL C-Interop Demo ===\n")
 
-(print "=== SDL C-Interop Demo ===\n")
+  // Initialize SDL
+  (SDL_Init SDL_INIT_VIDEO)
+  (set window (SDL_CreateWindow "C-Interop Demo" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED 640 480 SDL_WINDOW_SHOWN))
+  (set renderer (SDL_CreateRenderer window -1 0))
 
-// Initialize SDL
-(SDL_Init SDL_INIT_VIDEO)
-(set window (SDL_CreateWindow "C-Interop Demo" SDL_WINDOWPOS_UNDEFINED SDL_WINDOWPOS_UNDEFINED 640 480 SDL_WINDOW_SHOWN))
-(set renderer (SDL_CreateRenderer window -1 0))
-
-(if (not (= renderer 0))
-  (begin
-    (print "Window and renderer created!\n")
-    // Cornflower blue background
-    (SDL_SetRenderDrawColor renderer 100 149 237 255)
-    (SDL_RenderClear renderer)
-    (SDL_PumpEvents)
-    (SDL_RenderPresent renderer)
-    (SDL_Delay 3000)
-    (SDL_DestroyRenderer renderer)
+  (if (not (= renderer 0))
+    (begin
+      (print "Window and renderer created!\n")
+      // Cornflower blue background
+      (SDL_SetRenderDrawColor renderer 100 149 237 255)
+      (SDL_RenderClear renderer)
+      (SDL_PumpEvents)
+      (SDL_RenderPresent renderer)
+      (SDL_Delay 3000)
+      (SDL_DestroyRenderer renderer)
+    )
+    (print "Failed to create renderer\n")
   )
-  (print "Failed to create renderer\n")
-)
 
-(if (not (= window 0))
-  (SDL_DestroyWindow window)
-)
-(SDL_Quit)
-(print "Demo completed successfully!\n")
+  (if (not (= window 0))
+    (SDL_DestroyWindow window)
+  )
+  (SDL_Quit)
+  (print "Demo completed successfully!\n")
+  (ret 0)
+))

@@ -1,0 +1,19 @@
+// Test: address-of global variable (& global)
+(let val int 99)
+
+(pub main (fn [] int
+  // Take address of global
+  (let ptr (* int) (& val))
+
+  // Dereference to read
+  (print (* ptr))
+
+  // Modify global directly, verify via pointer
+  (set val 123)
+  (print (* ptr))
+
+  // Address-of in function call context
+  (let ptr2 (* int) (& val))
+  (print (* ptr2))
+
+  (ret 0)))

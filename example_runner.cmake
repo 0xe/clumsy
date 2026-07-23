@@ -2,13 +2,27 @@
 #
 # Required variables:
 #   COMPILER       path to clumsyc
-#   EXAMPLE_FILES  space-separated list of .cpl source files (or single file for backward compat)
+#   EXAMPLE_DIR    directory containing .cpl source files
 #   TMP_DIR        temp directory for intermediate files
 #
 # Optional variables:
 #   LINK_LIBS      extra link libraries (e.g. "-lSDL2")
 
-# Get example name from first file
+file(GLOB EXAMPLE_FILES "${EXAMPLE_DIR}/*.cpl")
+list(LENGTH EXAMPLE_FILES FILE_COUNT)
+if(FILE_COUNT EQUAL 0)
+    message(FATAL_ERROR "No .cpl files found in ${EXAMPLE_DIR}")
+endif()
+
+# Sort files so main.cpl comes first if it exists (for naming the binary)
+list(SORT EXAMPLE_FILES)
+# Move main.cpl to front if present
+list(FIND EXAMPLE_FILES "${EXAMPLE_DIR}/main.cpl" MAIN_IDX)
+if(NOT MAIN_IDX EQUAL -1)
+    list(REMOVE_AT EXAMPLE_FILES ${MAIN_IDX})
+    list(INSERT EXAMPLE_FILES 0 "${EXAMPLE_DIR}/main.cpl")
+endif()
+
 list(GET EXAMPLE_FILES 0 FIRST_FILE)
 get_filename_component(EXAMPLE_NAME ${FIRST_FILE} NAME_WE)
 
@@ -40,7 +54,7 @@ foreach(example_file ${EXAMPLE_FILES})
     list(APPEND OBJECT_FILES ${TMP_DIR}/${file_name}.o)
 endforeach()
 
-# Link (printf is in libc, no extra libs needed for print)
+# Link
 set(LINK_CMD clang -o ${TMP_DIR}/${EXAMPLE_NAME}.x ${OBJECT_FILES})
 if(DEFINED LINK_LIBS AND NOT LINK_LIBS STREQUAL "")
     separate_arguments(LIBS_LIST UNIX_COMMAND "${LINK_LIBS}")

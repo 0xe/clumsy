@@ -1,4 +1,6 @@
-(let base 2)
-(let exponent 3)
-(let result (** base exponent))
-(print result)
+(pub main (fn [] int
+  (let base 2)
+  (let exponent 3)
+  (let result (** base exponent))
+  (print result)
+  (ret 0)))

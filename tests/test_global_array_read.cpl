@@ -1,0 +1,18 @@
+// Test: global array read with static and dynamic index
+(let data int[5] [10 20 30 40 50])
+
+(pub main (fn [] int
+  // Static index reads
+  (print data[0])
+  (print data[2])
+  (print data[4])
+
+  // Dynamic index reads
+  (let i int 1)
+  (print data[i])
+  (let j int 3)
+  (print data[j])
+
+  // Array access in arithmetic
+  (print (+ data[0] data[4]))
+  (ret 0)))

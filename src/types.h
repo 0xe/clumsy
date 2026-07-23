@@ -87,6 +87,8 @@ typedef struct {
     char *name;
     SymbolType type;
     bool is_external;   // hack for C functions (type == SYM_C_FUNCTION should be enough)
+    bool is_public;     // pub: exported with .globl
+    bool is_global;     // top-level let/pub: stored in .data, not on stack
     char *c_library;    // library name for external functions
     union {
         struct {

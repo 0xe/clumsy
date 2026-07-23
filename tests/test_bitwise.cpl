@@ -1,14 +1,16 @@
-// Bitwise AND: 0xFF & 0x0F = 15
-(print (& 0xFF 0x0F))
+(pub main (fn [] int
+  // Bitwise AND: 0xFF & 0x0F = 15
+  (print (& 0xFF 0x0F))
 
-// Bitwise OR: 0x0F | 0xF0 = 255
-(print (| 0x0F 0xF0))
+  // Bitwise OR: 0x0F | 0xF0 = 255
+  (print (| 0x0F 0xF0))
 
-// Left shift: 1 << 4 = 16
-(print (<< 1 4))
+  // Left shift: 1 << 4 = 16
+  (print (<< 1 4))
 
-// Right shift: 0xFF >> 4 = 15
-(print (>> 0xFF 4))
+  // Right shift: 0xFF >> 4 = 15
+  (print (>> 0xFF 4))
 
-// Combined: (0xF0 | 0x0F) & 0xFF = 255
-(print (& (| 0xF0 0x0F) 0xFF))
+  // Combined: (0xF0 | 0x0F) & 0xFF = 255
+  (print (& (| 0xF0 0x0F) 0xFF))
+  (ret 0)))

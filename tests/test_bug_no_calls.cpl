@@ -1,4 +1,6 @@
 // Test with no function calls at all
 
-(let x int 42)
-(print x)
+(pub main (fn [] int
+  (let x int 42)
+  (print x)
+  (ret 0)))

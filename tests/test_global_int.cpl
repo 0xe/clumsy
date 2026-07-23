@@ -1,0 +1,10 @@
+// Test: global integer load and store
+(let counter int 0)
+
+(pub main (fn [] int
+  (print counter)
+  (set counter 42)
+  (print counter)
+  (set counter (+ counter 8))
+  (print counter)
+  (ret 0)))

@@ -1,3 +1,5 @@
-(let x int -1)
-(let y int -100)
-(print (+ x y))
+(pub main (fn [] int
+  (let x int -1)
+  (let y int -100)
+  (print (+ x y))
+  (ret 0)))

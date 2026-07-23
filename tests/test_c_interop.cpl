@@ -4,15 +4,17 @@
 (extern printf [(* char) int] int)
 (extern malloc [int] (* int))
 
-// Test pointer variable
-(let ptr (* int) 0)
-(let x int 42)
+(pub main (fn [] int
+  // Test pointer variable
+  (let ptr (* int) 0)
+  (let x int 42)
 
-// Test address-of operator
-(set ptr (& x))
+  // Test address-of operator
+  (set ptr (& x))
 
-// Test dereference operator
-(let y int (* ptr))
+  // Test dereference operator
+  (let y int (* ptr))
 
-// Call C function
-(printf "Hello from C! x = %d, y = %d\n" x y)
+  // Call C function
+  (printf "Hello from C! x = %d, y = %d\n" x y)
+  (ret 0)))

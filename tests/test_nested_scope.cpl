@@ -1,6 +1,8 @@
-(let x int 10)
-(begin
-  (let y int 20)
+(pub main (fn [] int
+  (let x int 10)
   (begin
-    (let z int 30)
-    (print (+ x (+ y z)))))
+    (let y int 20)
+    (begin
+      (let z int 30)
+      (print (+ x (+ y z)))))
+  (ret 0)))
