@@ -57,7 +57,7 @@ if(BACKEND STREQUAL "qbe")
 else()
     # Legacy ARM64 pipeline: source → assembly → executable
     execute_process(
-        COMMAND ${COMPILER} ${TEST_FILE}
+        COMMAND ${COMPILER} --backend=aarch64-legacy ${TEST_FILE}
         OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.s
         ERROR_VARIABLE COMPILE_ERR
         RESULT_VARIABLE COMPILE_RC

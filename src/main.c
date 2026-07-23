@@ -15,7 +15,7 @@ void usage(const char *program_name) {
     fprintf(stderr, "compile clumsy to assembly\n");
     fprintf(stderr, "options:\n");
     fprintf(stderr, "  --debug                              print syntax tree and symbol table to stderr\n");
-    fprintf(stderr, "  --backend=aarch64-legacy|qbe          select backend (default: aarch64-legacy)\n");
+    fprintf(stderr, "  --backend=aarch64-legacy|qbe          select backend (default: qbe)\n");
     exit(1);
 }
 
@@ -51,7 +51,7 @@ char *read_file(const char *filename) {
 
 int main(int argc, char *argv[]) {
     bool debug = false;
-    Backend backend = BACKEND_ARM64;
+    Backend backend = BACKEND_QBE;
     const char *source_file = NULL;
     
     for (int i = 1; i < argc; i++) {
