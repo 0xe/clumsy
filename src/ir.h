@@ -173,6 +173,7 @@ typedef struct {
         char **struct_fields;
         int num_struct_fields;
         bool is_struct;
+        bool is_extern;  // variable extern: declaration only, no data emission
     } *globals;
     int num_globals;
     int global_capacity;

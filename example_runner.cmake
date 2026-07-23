@@ -26,68 +26,41 @@ endif()
 list(GET EXAMPLE_FILES 0 FIRST_FILE)
 get_filename_component(EXAMPLE_NAME ${FIRST_FILE} NAME_WE)
 
-# QBE has no extern declarations, so cross-file globals produce bad page relocations.
-# Use legacy ARM64 backend for multi-file examples.
-if(FILE_COUNT GREATER 1)
-    set(EXAMPLE_BACKEND "aarch64-legacy")
-else()
-    set(EXAMPLE_BACKEND "qbe")
-endif()
+# QBE pipeline for all examples (works with cross-file globals now)
+set(EXAMPLE_BACKEND "qbe")
 
 set(OBJECT_FILES "")
 foreach(example_file ${EXAMPLE_FILES})
     get_filename_component(file_name ${example_file} NAME_WE)
     
-    if(EXAMPLE_BACKEND STREQUAL "qbe")
-        # QBE pipeline: clumsyc -> QBE IL -> ARM64 asm -> object
-        execute_process(
-            COMMAND ${COMPILER} --backend=qbe ${example_file}
-            OUTPUT_FILE ${TMP_DIR}/${file_name}.qbe
-            ERROR_VARIABLE COMPILE_ERR
-            RESULT_VARIABLE COMPILE_RC
-        )
-        if(NOT COMPILE_RC EQUAL 0)
-            message(FATAL_ERROR "FAIL (compile error in ${file_name}): ${COMPILE_ERR}")
-        endif()
+    # QBE pipeline: clumsyc -> QBE IL -> ARM64 asm -> object
+    execute_process(
+        COMMAND ${COMPILER} --backend=qbe ${example_file}
+        OUTPUT_FILE ${TMP_DIR}/${file_name}.qbe
+        ERROR_VARIABLE COMPILE_ERR
+        RESULT_VARIABLE COMPILE_RC
+    )
+    if(NOT COMPILE_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (compile error in ${file_name}): ${COMPILE_ERR}")
+    endif()
 
-        execute_process(
-            COMMAND qbe -o ${TMP_DIR}/${file_name}.s -
-            INPUT_FILE ${TMP_DIR}/${file_name}.qbe
-            ERROR_VARIABLE QBE_ERR
-            RESULT_VARIABLE QBE_RC
-        )
-        if(NOT QBE_RC EQUAL 0)
-            message(FATAL_ERROR "FAIL (qbe error in ${file_name}): ${QBE_ERR}")
-        endif()
+    execute_process(
+        COMMAND qbe -o ${TMP_DIR}/${file_name}.s -
+        INPUT_FILE ${TMP_DIR}/${file_name}.qbe
+        ERROR_VARIABLE QBE_ERR
+        RESULT_VARIABLE QBE_RC
+    )
+    if(NOT QBE_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (qbe error in ${file_name}): ${QBE_ERR}")
+    endif()
 
-        execute_process(
-            COMMAND clang -c -o ${TMP_DIR}/${file_name}.o ${TMP_DIR}/${file_name}.s
-            ERROR_VARIABLE ASM_ERR
-            RESULT_VARIABLE ASM_RC
-        )
-        if(NOT ASM_RC EQUAL 0)
-            message(FATAL_ERROR "FAIL (assembly error in ${file_name}): ${ASM_ERR}")
-        endif()
-    else()
-        # Legacy pipeline: clumsyc -> ARM64 asm -> object
-        execute_process(
-            COMMAND ${COMPILER} --backend=aarch64-legacy ${example_file}
-            OUTPUT_FILE ${TMP_DIR}/${file_name}.s
-            ERROR_VARIABLE COMPILE_ERR
-            RESULT_VARIABLE COMPILE_RC
-        )
-        if(NOT COMPILE_RC EQUAL 0)
-            message(FATAL_ERROR "FAIL (compile error in ${file_name}): ${COMPILE_ERR}")
-        endif()
-
-        execute_process(
-            COMMAND clang -c -o ${TMP_DIR}/${file_name}.o ${TMP_DIR}/${file_name}.s
-            ERROR_VARIABLE ASM_ERR
-            RESULT_VARIABLE ASM_RC
-        )
-        if(NOT ASM_RC EQUAL 0)
-            message(FATAL_ERROR "FAIL (assembly error in ${file_name}): ${ASM_ERR}")
-        endif()
+    execute_process(
+        COMMAND clang -c -o ${TMP_DIR}/${file_name}.o ${TMP_DIR}/${file_name}.s
+        ERROR_VARIABLE ASM_ERR
+        RESULT_VARIABLE ASM_RC
+    )
+    if(NOT ASM_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (assembly error in ${file_name}): ${ASM_ERR}")
     endif()
     
     list(APPEND OBJECT_FILES ${TMP_DIR}/${file_name}.o)

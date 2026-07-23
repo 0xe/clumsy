@@ -198,6 +198,7 @@ void ir_add_global(IRProgram *prog, const char *name, int64_t value, bool is_str
     prog->globals[i].num_struct_fields = 0;
     prog->globals[i].is_struct = false;
     prog->globals[i].array_values = NULL;
+    prog->globals[i].is_extern = false;
 }
 
 void ir_add_global_array(IRProgram *prog, const char *name, int64_t *values, int array_size, bool is_public) {
@@ -215,6 +216,7 @@ void ir_add_global_array(IRProgram *prog, const char *name, int64_t *values, int
     prog->globals[i].struct_fields = NULL;
     prog->globals[i].num_struct_fields = 0;
     prog->globals[i].is_struct = false;
+    prog->globals[i].is_extern = false;
     if (values && array_size > 0) {
         prog->globals[i].array_values = calloc(array_size, sizeof(int64_t));
         memcpy(prog->globals[i].array_values, values, array_size * sizeof(int64_t));
@@ -236,6 +238,8 @@ void ir_add_struct_global(IRProgram *prog, const char *name, char **fields, int 
     prog->globals[i].array_size = 0;
     prog->globals[i].is_public = is_public;
     prog->globals[i].is_struct = true;
+    prog->globals[i].is_extern = false;
+    prog->globals[i].array_values = NULL;
     prog->globals[i].num_struct_fields = num_fields;
     prog->globals[i].struct_fields = calloc(num_fields, sizeof(char *));
     for (int j = 0; j < num_fields; j++) {

@@ -277,27 +277,30 @@ void emit_qbe(IRProgram *prog, FILE *out) {
     // Emit global data (skip struct type definitions)
     for (int i = 0; i < prog->num_globals; i++) {
         if (prog->globals[i].is_struct) continue; // skip struct type metadata
+        if (prog->globals[i].is_extern) continue; // skip extern declarations (no data)
         char *gname = qbe_sanitize(prog->globals[i].name);
+        const char *exp = prog->globals[i].is_public ? "export " : "";
         if (prog->globals[i].is_string) {
+            fprintf(out, "%s", exp);
             emit_qbe_string_global(gname,
                                    prog->globals[i].str_val, out);
         } else if (prog->globals[i].array_size > 0) {
             if (prog->globals[i].array_values) {
-                fprintf(out, "data $%s = { l %ld", gname, (long)prog->globals[i].array_values[0]);
+                fprintf(out, "%sdata $%s = { l %ld", exp, gname, (long)prog->globals[i].array_values[0]);
                 for (int j = 1; j < prog->globals[i].array_size; j++) {
                     fprintf(out, ", l %ld", (long)prog->globals[i].array_values[j]);
                 }
                 fprintf(out, " }\n");
             } else {
-                fprintf(out, "data $%s = { l %ld", gname, (long)prog->globals[i].value);
+                fprintf(out, "%sdata $%s = { l %ld", exp, gname, (long)prog->globals[i].value);
                 for (int j = 1; j < prog->globals[i].array_size; j++) {
                     fprintf(out, ", l %ld", (long)prog->globals[i].value);
                 }
                 fprintf(out, " }\n");
             }
         } else {
-            fprintf(out, "data $%s = { l %ld }\n",
-                    gname, (long)prog->globals[i].value);
+            fprintf(out, "%sdata $%s = { l %ld }\n",
+                    exp, gname, (long)prog->globals[i].value);
         }
         free(gname);
     }
