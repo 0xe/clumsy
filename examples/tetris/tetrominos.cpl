@@ -26,13 +26,6 @@
 (pub cx int[4] [0 0 0 0])
 (pub cy int[4] [0 0 0 0])
 
-// Temp vars
-(pub base int 0)
-(pub _i int 0)
-(pub _ok int 0)
-(pub _nx int 0)
-(pub _ny int 0)
-
 // Helper: check if position is blocked (out of bounds or occupied)
 (pub blocked (fn [(x int) (y int)] int
   (if (|| (< x 0) (|| (>= x COLS) (|| (< y 0) (>= y ROWS))))
@@ -45,12 +38,12 @@
 
 // Helper: move piece by dx, dy if not blocked
 (pub try_move (fn [(dx int) (dy int)] int
-  (set _ok 1)
-  (set _i 0)
+  (let _ok int 1)
+  (let _i int 0)
   (while (< _i 4)
     (begin
-      (set _nx (+ cx[_i] dx))
-      (set _ny (+ cy[_i] dy))
+      (let _nx (+ cx[_i] dx))
+      (let _ny (+ cy[_i] dy))
       (if (blocked _nx _ny) (set _ok 0))
       (set _i (+ _i 1))
     ))
@@ -68,8 +61,8 @@
 
 // Helper: update cell positions from ppx/ppy and shape data
 (pub update_cells (fn [] void
-  (set base (+ (* pk 32) (* pr 8)))
-  (set _i 0)
+  (let base (+ (* pk 32) (* pr 8)))
+  (let _i int 0)
   (while (< _i 4)
     (begin
       (set cx[_i] (+ ppx SH[(+ base (* _i 2))]))
@@ -87,7 +80,7 @@
 
 // Helper: lock piece to board
 (pub lock (fn [] void
-  (set _i 0)
+  (let _i int 0)
   (while (< _i 4)
     (begin
       (if (in_bounds cx[_i] cy[_i])
@@ -135,7 +128,7 @@
 
 // Helper: check if game over (spawned piece overlaps)
 (pub check_game_over (fn [] int
-  (set _i 0)
+  (let _i int 0)
   (while (< _i 4)
     (begin
       (if (blocked cx[_i] cy[_i]) (ret 1))
@@ -152,13 +145,13 @@
   (if (= kc KU)
     (begin
       (let nr (% (+ pr 1) 4))
-      (set _ok 1)
-      (set _i 0)
+      (let _ok int 1)
+      (let _i int 0)
       (let nbase (+ (* pk 32) (* nr 8)))
       (while (< _i 4)
         (begin
-          (set _nx (+ ppx SH[(+ nbase (* _i 2))]))
-          (set _ny (+ ppy SH[(+ nbase (+ (* _i 2) 1))]))
+          (let _nx (+ ppx SH[(+ nbase (* _i 2))]))
+          (let _ny (+ ppy SH[(+ nbase (+ (* _i 2) 1))]))
           (if (blocked _nx _ny) (set _ok 0))
           (set _i (+ _i 1))
         ))

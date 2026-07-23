@@ -14,7 +14,6 @@
 (extern rc int[2])
 (extern cx int[4])
 (extern cy int[4])
-(extern _i int)
 
 (extern SDL_SetRenderDrawColor [(* void) int int int int] int)
 (extern SDL_RenderClear [(* void)] int)
@@ -47,7 +46,7 @@
 
 // Draw the currently falling piece
 (pub draw_piece (fn [] void
-  (set _i 0)
+  (let _i int 0)
   (while (< _i 4)
     (begin
       (if (in_bounds cx[_i] cy[_i])
