@@ -41,6 +41,15 @@ static char *qbe_sanitize(const char *name) {
     return result;
 }
 
+static const char *qbe_type_name(IRType type) {
+    switch (type) {
+        case IR_TYPE_I64: return "l";
+        case IR_TYPE_PTR: return "l";
+        case IR_TYPE_VOID: return "w";  // QBE has no void; use w as placeholder
+        default: return "l";
+    }
+}
+
 static void emit_qbe_operand(IROperand *op, FILE *out) {
     switch (op->type) {
         case OP_NONE: break;
@@ -243,10 +252,10 @@ static void emit_qbe_string_global(const char *name, const char *value, FILE *ou
 static void emit_qbe_function(IRFunction *fn, FILE *out) {
     if (fn->is_public) fprintf(out, "export ");
     char *fname = qbe_sanitize(fn->name);
-    fprintf(out, "function %s $%s(", ir_type_name(fn->return_type), fname);
+    fprintf(out, "function %s $%s(", qbe_type_name(fn->return_type), fname);
     for (int i = 0; i < fn->num_params; i++) {
         if (i > 0) fprintf(out, ", ");
-        fprintf(out, "%s %%%s", ir_type_name(fn->param_types[i]), fn->params[i]);
+        fprintf(out, "%s %%%s", qbe_type_name(fn->param_types[i]), fn->params[i]);
     }
     fprintf(out, ") {\n");
 
