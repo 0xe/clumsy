@@ -1,5 +1,6 @@
 #include "compiler.h"
 #include <stdarg.h>
+#include <stdint.h>
 
 // Global struct type table  
 static StructTypeTable *global_struct_types = NULL;
