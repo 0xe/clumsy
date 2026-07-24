@@ -18,6 +18,7 @@ set(COMPILER_SOURCES
     src/ir.c
     src/ir_build.c
     src/emit_qbe.c
+    src/cfg.c
 )
 
 set(COMPILER_HEADERS
@@ -26,6 +27,7 @@ set(COMPILER_HEADERS
     src/parser.h
     src/compiler.h
     src/ir.h
+    src/cfg.h
 )
 
 add_executable(clumsyc ${COMPILER_SOURCES} ${COMPILER_HEADERS})

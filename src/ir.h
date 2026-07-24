@@ -106,6 +106,9 @@ typedef struct IRBlock {
     struct IRBlock **succs;   // successor blocks (CFG edges)
     int num_succs;
     int succ_capacity;
+    struct IRBlock **preds;   // predecessor blocks (CFG edges)
+    int num_preds;
+    int pred_capacity;
 
     // Dominator tree (computed later in Phase 2)
     struct IRBlock *idom;

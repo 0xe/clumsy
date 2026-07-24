@@ -92,6 +92,9 @@ IRBlock *ir_new_block(const char *label) {
     b->succ_capacity = 4;
     b->succs = calloc(b->succ_capacity, sizeof(IRBlock *));
     b->num_succs = 0;
+    b->pred_capacity = 4;
+    b->preds = calloc(b->pred_capacity, sizeof(IRBlock *));
+    b->num_preds = 0;
     return b;
 }
 
