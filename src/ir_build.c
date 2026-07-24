@@ -1267,9 +1267,21 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
                                 } else if (init_value->type == AST_STRING) {
                                     ir_add_global(b->prog, name, 0, true, init_value->data.string_value, 0, true);
                                 } else if (init_value->type == AST_ARRAY) {
-                                    int arr_size = init_value->data.list.count;
+                                    int init_count = init_value->data.list.count;
+                                    int arr_size = init_count;
+                                    // Extract declared array size from type node: (type int SIZE)
+                                    if (stmt->data.list.count >= 3) {
+                                        ASTNode *type_node = stmt->data.list.children[2];
+                                        if (type_node->type == AST_LIST && type_node->data.list.count >= 3 &&
+                                            type_node->data.list.children[0]->type == AST_IDENTIFIER &&
+                                            strcmp(type_node->data.list.children[0]->data.string_value, "[]") == 0 &&
+                                            type_node->data.list.children[2]->type == AST_INT) {
+                                            int declared_size = type_node->data.list.children[2]->data.int_value;
+                                            if (declared_size > arr_size) arr_size = declared_size;
+                                        }
+                                    }
                                     int64_t *vals = calloc(arr_size, sizeof(int64_t));
-                                    for (int ai = 0; ai < arr_size; ai++) {
+                                    for (int ai = 0; ai < init_count; ai++) {
                                         if (init_value->data.list.children[ai]->type == AST_INT)
                                             vals[ai] = init_value->data.list.children[ai]->data.int_value;
                                     }
@@ -1289,9 +1301,21 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
                             } else if (init_value->type == AST_STRING) {
                                 ir_add_global(b->prog, name, 0, true, init_value->data.string_value, 0, false);
                             } else if (init_value->type == AST_ARRAY) {
-                                int arr_size = init_value->data.list.count;
+                                int init_count = init_value->data.list.count;
+                                int arr_size = init_count;
+                                // Extract declared array size from type node
+                                if (stmt->data.list.count >= 3) {
+                                    ASTNode *type_node = stmt->data.list.children[2];
+                                    if (type_node->type == AST_LIST && type_node->data.list.count >= 3 &&
+                                        type_node->data.list.children[0]->type == AST_IDENTIFIER &&
+                                        strcmp(type_node->data.list.children[0]->data.string_value, "[]") == 0 &&
+                                        type_node->data.list.children[2]->type == AST_INT) {
+                                        int declared_size = type_node->data.list.children[2]->data.int_value;
+                                        if (declared_size > arr_size) arr_size = declared_size;
+                                    }
+                                }
                                 int64_t *vals = calloc(arr_size, sizeof(int64_t));
-                                for (int ai = 0; ai < arr_size; ai++) {
+                                for (int ai = 0; ai < init_count; ai++) {
                                     if (init_value->data.list.children[ai]->type == AST_INT)
                                         vals[ai] = init_value->data.list.children[ai]->data.int_value;
                                 }
