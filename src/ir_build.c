@@ -520,7 +520,7 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 args[0] = op_global(func_name);  // function name
                 int num_args = 0;
 
-                for (size_t i = 1; i < expr->data.list.count && num_args < 4; i++) {
+                for (size_t i = 1; i < expr->data.list.count && num_args < 5; i++) {
                     args[num_args + 1] = ir_build_expr(b, expr->data.list.children[i], symbols);
                     num_args++;
                 }
@@ -536,11 +536,11 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 }
 
                 if (is_void) {
-                    ir_emit(b, ir_instr(IR_CALL, op_none(), args[0], args[1], args[2], IR_TYPE_VOID));
+                    ir_emit(b, ir_call(op_none(), args, num_args + 1, IR_TYPE_VOID));
                     return op_none();
                 } else {
                     char *temp = ir_gen_temp(b);
-                    ir_emit(b, ir_instr(IR_CALL, op_reg(temp), args[0], args[1], args[2], IR_TYPE_I64));
+                    ir_emit(b, ir_call(op_reg(temp), args, num_args + 1, IR_TYPE_I64));
                     IROperand result = op_reg(temp);
                     free(temp);
                     return result;

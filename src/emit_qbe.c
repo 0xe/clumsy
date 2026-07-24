@@ -192,13 +192,13 @@ static void emit_qbe_instr(IRInstr *instr, FILE *out) {
             if (instr->is_variadic) {
                 // macOS ARM64 ABI: variadic args go on stack after ...
                 fprintf(out, ", ...");
-                for (int i = 2; i < 5 && instr->args[i].type != OP_NONE; i++) {
+                for (int i = 2; i < 6 && instr->args[i].type != OP_NONE; i++) {
                     fprintf(out, ", l ");
                     emit_qbe_operand(&instr->args[i], out);
                 }
             } else {
                 // Non-variadic: all args in registers
-                for (int i = 2; i < 5 && instr->args[i].type != OP_NONE; i++) {
+                for (int i = 2; i < 6 && instr->args[i].type != OP_NONE; i++) {
                     fprintf(out, ", l ");
                     emit_qbe_operand(&instr->args[i], out);
                 }

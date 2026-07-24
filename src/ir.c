@@ -58,6 +58,17 @@ IRInstr ir_instr(IROpcode op, IROperand dest, IROperand a0, IROperand a1, IROper
     return i;
 }
 
+IRInstr ir_call(IROperand dest, IROperand *args, int num_args, IRType dest_type) {
+    IRInstr i = {0};
+    i.op = IR_CALL;
+    i.dest = dest;
+    i.dest_type = dest_type;
+    for (int j = 0; j < num_args && j < 6; j++) {
+        i.args[j] = args[j];
+    }
+    return i;
+}
+
 IRInstr ir_phi(IROperand dest, IROperand *pairs, int count, IRType dest_type) {
     IRInstr i = {0};
     i.op = IR_PHI;
