@@ -55,6 +55,7 @@ static void emit_qbe_operand(IROperand *op, FILE *out) {
         case OP_NONE: break;
         case OP_IMM: fprintf(out, "%ld", (long)op->imm); break;
         case OP_REGISTER: fprintf(out, "%%%s", op->reg); break;
+        case OP_VREG: fprintf(out, "%s", op->reg); break;
         case OP_BLOCK: fprintf(out, "@%s", op->block); break;
         case OP_GLOBAL: {
             char *s = qbe_sanitize(op->global);

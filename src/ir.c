@@ -31,6 +31,16 @@ IROperand op_reg(const char *name) {
     return o;
 }
 
+IROperand op_vreg(int id) {
+    IROperand o = {0};
+    o.type = OP_VREG;
+    // Encode vreg id as a string "%v_N"
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%%v_%d", id);
+    o.reg = ir_strdup(buf);
+    return o;
+}
+
 IROperand op_block(const char *label) {
     IROperand o = {0};
     o.type = OP_BLOCK;
@@ -95,7 +105,14 @@ IRBlock *ir_new_block(const char *label) {
     b->pred_capacity = 4;
     b->preds = calloc(b->pred_capacity, sizeof(IRBlock *));
     b->num_preds = 0;
+    b->df_capacity = 4;
+    b->dom_frontiers = calloc(b->df_capacity, sizeof(IRBlock *));
+    b->num_dom_frontiers = 0;
     return b;
+}
+
+IROperand ir_new_vreg(IRFunction *fn) {
+    return op_vreg(fn->vreg_counter++);
 }
 
 void ir_append_instr(IRBlock *block, IRInstr instr) {
@@ -268,20 +285,22 @@ static void free_ir_block(IRBlock *b) {
     free(b->label);
     for (int i = 0; i < b->num_instrs; i++) {
         IRInstr *ins = &b->instrs[i];
-        if (ins->dest.type == OP_REGISTER) free(ins->dest.reg);
+        if (ins->dest.type == OP_REGISTER || ins->dest.type == OP_VREG) free(ins->dest.reg);
         else if (ins->dest.type == OP_GLOBAL) free(ins->dest.global);
-        for (int j = 0; j < 5; j++) {
-            if (ins->args[j].type == OP_REGISTER) free(ins->args[j].reg);
+        for (int j = 0; j < 8; j++) {
+            if (ins->args[j].type == OP_REGISTER || ins->args[j].type == OP_VREG) free(ins->args[j].reg);
             else if (ins->args[j].type == OP_GLOBAL) free(ins->args[j].global);
             else if (ins->args[j].type == OP_BLOCK) free(ins->args[j].block);
         }
         for (int j = 0; j < ins->phi_count * 2; j++) {
-            if (ins->phi_pairs[j].type == OP_REGISTER) free(ins->phi_pairs[j].reg);
+            if (ins->phi_pairs[j].type == OP_REGISTER || ins->phi_pairs[j].type == OP_VREG) free(ins->phi_pairs[j].reg);
             else if (ins->phi_pairs[j].type == OP_BLOCK) free(ins->phi_pairs[j].block);
         }
     }
     free(b->instrs);
     free(b->succs);
+    free(b->preds);
+    free(b->dom_frontiers);
     free(b);
 }
 
@@ -381,6 +400,7 @@ static void ir_print_operand(IROperand *op, FILE *out) {
         case OP_NONE: break;
         case OP_IMM: fprintf(out, "%ld", (long)op->imm); break;
         case OP_REGISTER: fprintf(out, "%%%s", op->reg); break;
+        case OP_VREG: fprintf(out, "%s", op->reg); break;
         case OP_BLOCK: fprintf(out, "@%s", op->block); break;
         case OP_GLOBAL: fprintf(out, "$%s", op->global); break;
     }

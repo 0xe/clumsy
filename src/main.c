@@ -12,11 +12,12 @@ typedef enum {
 } Backend;
 
 void usage(const char *program_name) {
-    fprintf(stderr, "usage: %s [--debug] [--dump-cfg] [--backend=aarch64-legacy|qbe] <source_file>\n", program_name);
+    fprintf(stderr, "usage: %s [--debug] [--dump-cfg] [--dump-ssa] [--backend=aarch64-legacy|qbe] <source_file>\n", program_name);
     fprintf(stderr, "compile clumsy to assembly\n");
     fprintf(stderr, "options:\n");
     fprintf(stderr, "  --debug                              print syntax tree and symbol table to stderr\n");
     fprintf(stderr, "  --dump-cfg                           print CFG as Graphviz DOT to stdout\n");
+    fprintf(stderr, "  --dump-ssa                           run SSA pipeline and print IR to stderr\n");
     fprintf(stderr, "  --backend=aarch64-legacy|qbe          select backend (default: qbe)\n");
     exit(1);
 }
@@ -54,6 +55,7 @@ char *read_file(const char *filename) {
 int main(int argc, char *argv[]) {
     bool debug = false;
     bool dump_cfg = false;
+    bool dump_ssa = false;
     Backend backend = BACKEND_QBE;
     const char *source_file = NULL;
     
@@ -62,6 +64,8 @@ int main(int argc, char *argv[]) {
             debug = true;
         } else if (strcmp(argv[i], "--dump-cfg") == 0) {
             dump_cfg = true;
+        } else if (strcmp(argv[i], "--dump-ssa") == 0) {
+            dump_ssa = true;
         } else if (strncmp(argv[i], "--backend=", 10) == 0) {
             const char *name = argv[i] + 10;
             if (strcmp(name, "aarch64-legacy") == 0 || strcmp(name, "arm64") == 0) {
@@ -139,8 +143,30 @@ int main(int argc, char *argv[]) {
 
         if (dump_cfg) {
             for (int fi = 0; fi < prog->num_functions; fi++) {
-                cfg_dump_dot(prog->functions[fi], stdout);
+                cfg_dump_dot(prog->functions[fi], stdout, CFG_DOT_CFG);
                 fprintf(stdout, "\n");
+            }
+            free_ir_program(prog);
+            free_symbol_table(symbols);
+            free_ast(ast);
+            free_token_array(tokens);
+            free(source_code);
+            return 0;
+        }
+
+        // Run SSA pipeline if requested
+        if (dump_ssa) {
+            for (int fi = 0; fi < prog->num_functions; fi++) {
+                IRFunction *fn = prog->functions[fi];
+                cfg_ssa_pipeline(fn);
+
+                fprintf(stderr, "=== %s (SSA) ===\n", fn->name);
+                ir_print_function(fn, stderr);
+
+                fprintf(stderr, "\n--- Dominator Tree ---\n");
+                cfg_dump_dot(fn, stderr, CFG_DOT_DOM);
+                fprintf(stderr, "\n--- Dominance Frontiers ---\n");
+                cfg_dump_dot(fn, stderr, CFG_DOT_DF);
             }
             free_ir_program(prog);
             free_symbol_table(symbols);

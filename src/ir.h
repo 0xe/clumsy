@@ -70,6 +70,7 @@ typedef enum {
     OP_NONE,
     OP_IMM,      // immediate integer constant
     OP_REGISTER, // virtual register (%name)
+    OP_VREG,     // SSA virtual register (%v_N)
     OP_BLOCK,    // basic block label (@label)
     OP_GLOBAL,   // global symbol ($name)
 } IROperandType;
@@ -114,6 +115,18 @@ typedef struct IRBlock {
     struct IRBlock *idom;
     struct IRBlock **dom_children;
     int num_dom_children;
+
+    // Dominance frontiers (set of blocks where this block's dominator frontier is)
+    struct IRBlock **dom_frontiers;
+    int num_dom_frontiers;
+    int df_capacity;
+
+    // SSA: predecessors in the CFG (for phi argument construction)
+    struct IRBlock **phi_preds;   // preds that have phi args for this block
+    int num_phi_preds;
+
+    // Block index in RPO order (computed by dominator algorithm)
+    int rpo_index;
 } IRBlock;
 
 // --- IR Functions ---
@@ -141,6 +154,9 @@ typedef struct {
 
     // Label counter for generating unique labels
     int label_counter;
+
+    // SSA: virtual register counter
+    int vreg_counter;
 
     bool is_public;   // pub: export with 'export' keyword
 } IRFunction;
@@ -188,6 +204,7 @@ typedef struct {
 IROperand op_none(void);
 IROperand op_imm(int64_t value);
 IROperand op_reg(const char *name);
+IROperand op_vreg(int id);
 IROperand op_block(const char *label);
 IROperand op_global(const char *name);
 
@@ -199,6 +216,9 @@ IRInstr ir_phi(IROperand dest, IROperand *pairs, int count, IRType dest_type);
 // Basic blocks
 IRBlock *ir_new_block(const char *label);
 void ir_append_instr(IRBlock *block, IRInstr instr);
+
+// SSA helpers
+IROperand ir_new_vreg(IRFunction *fn);
 
 // Functions
 IRFunction *ir_new_function(const char *name, IRType return_type);
