@@ -63,7 +63,7 @@ IRInstr ir_call(IROperand dest, IROperand *args, int num_args, IRType dest_type)
     i.op = IR_CALL;
     i.dest = dest;
     i.dest_type = dest_type;
-    for (int j = 0; j < num_args && j < 6; j++) {
+    for (int j = 0; j < num_args && j < 8; j++) {
         i.args[j] = args[j];
     }
     return i;

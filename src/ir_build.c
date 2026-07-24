@@ -520,7 +520,7 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 args[0] = op_global(func_name);  // function name
                 int num_args = 0;
 
-                for (size_t i = 1; i < expr->data.list.count && num_args < 5; i++) {
+                for (size_t i = 1; i < expr->data.list.count && num_args < 7; i++) {
                     args[num_args + 1] = ir_build_expr(b, expr->data.list.children[i], symbols);
                     num_args++;
                 }
@@ -1050,7 +1050,7 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
         if (stmt->type == AST_EXTERN_DECL) {
             const char *name = stmt->data.list.children[0]->data.string_value;
 
-            if (stmt->data.list.count >= 2 && (stmt->data.list.children[1]->type == AST_LIST || stmt->data.list.children[1]->type == AST_ARRAY)) {
+            if (stmt->data.list.count >= 2 && stmt->data.list.children[1]->type == AST_ARRAY) {
                 // Function extern: (extern name [params] return_type)
                 ASTNode *params_node = stmt->data.list.children[1];
                 IRType ret_type = IR_TYPE_I64;

@@ -89,7 +89,7 @@ typedef struct {
 typedef struct {
     IROpcode op;
     IROperand dest;        // result register (or OP_NONE)
-    IROperand args[6];     // up to 6 source operands (func + 5 args for calls)
+    IROperand args[8];     // up to 8 source operands (func + 7 args for calls)
     IROperand phi_pairs[8]; // for IR_PHI: [val, block, val, block, ...]
     int phi_count;
     IRType dest_type;      // type of result (i64 or ptr)
