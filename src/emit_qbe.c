@@ -115,14 +115,16 @@ static void emit_qbe_instr(IRInstr *instr, FILE *out) {
         case IR_EQ: case IR_NE: case IR_LT: case IR_GT: case IR_LE: case IR_GE: {
             // QBE comparisons produce w (32-bit) results.
             // We use a temp w register, then extend to l.
+            static int cmp_counter = 0;
             const char *cmp_op = qbe_cmp_opcode(instr->op);
-            fprintf(out, "%%_cmp_%s =w %s ", instr->dest.reg, cmp_op);
+            fprintf(out, "%%_cmp_%d =w %s ", cmp_counter, cmp_op);
             emit_qbe_operand(&instr->args[0], out);
             fprintf(out, ", ");
             emit_qbe_operand(&instr->args[1], out);
             fprintf(out, "\n\t");
             emit_qbe_operand(&instr->dest, out);
-            fprintf(out, " =l extsw %%_cmp_%s", instr->dest.reg);
+            fprintf(out, " =l extsw %%_cmp_%d", cmp_counter);
+            cmp_counter++;
             break;
         }
 

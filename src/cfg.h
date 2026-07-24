@@ -13,13 +13,13 @@ void cfg_compute_dominators(IRFunction *fn);
 // Compute dominance frontiers for all blocks
 void cfg_compute_dominance_frontiers(IRFunction *fn);
 
-// Place phi functions at dominance frontiers
+// Place phi functions at dominance frontiers (requires liveness analysis)
 void cfg_place_phis(IRFunction *fn);
 
-// Rename variables to SSA form
+// Rename variables to SSA form (dominator-tree DFS)
 void cfg_ssa_rename(IRFunction *fn);
 
-// Run the full SSA pipeline: build → doms → frontiers → phis → rename
+// Run SSA pipeline: build → doms → rename (no phis — memory-based IR)
 void cfg_ssa_pipeline(IRFunction *fn);
 
 typedef enum {

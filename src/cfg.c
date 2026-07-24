@@ -598,8 +598,6 @@ void cfg_ssa_rename(IRFunction *fn) {
 void cfg_ssa_pipeline(IRFunction *fn) {
     cfg_build(fn);
     cfg_compute_dominators(fn);
-    cfg_compute_dominance_frontiers(fn);
-    cfg_place_phis(fn);
     cfg_ssa_rename(fn);
 }
 

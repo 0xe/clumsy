@@ -136,9 +136,9 @@ int main(int argc, char *argv[]) {
             ir_print_program(prog, stderr);
         }
 
-        // Build CFG for all functions
+        // Run SSA pipeline on all functions (dominators + rename)
         for (int fi = 0; fi < prog->num_functions; fi++) {
-            cfg_build(prog->functions[fi]);
+            cfg_ssa_pipeline(prog->functions[fi]);
         }
 
         if (dump_cfg) {
@@ -154,18 +154,15 @@ int main(int argc, char *argv[]) {
             return 0;
         }
 
-        // Run SSA pipeline if requested
         if (dump_ssa) {
             for (int fi = 0; fi < prog->num_functions; fi++) {
                 IRFunction *fn = prog->functions[fi];
-                cfg_ssa_pipeline(fn);
-
                 fprintf(stderr, "=== %s (SSA) ===\n", fn->name);
                 ir_print_function(fn, stderr);
-
                 fprintf(stderr, "\n--- Dominator Tree ---\n");
                 cfg_dump_dot(fn, stderr, CFG_DOT_DOM);
                 fprintf(stderr, "\n--- Dominance Frontiers ---\n");
+                cfg_compute_dominance_frontiers(fn);
                 cfg_dump_dot(fn, stderr, CFG_DOT_DF);
             }
             free_ir_program(prog);
@@ -180,10 +177,6 @@ int main(int argc, char *argv[]) {
         fflush(stdout);
         free_ir_program(prog);
         free_symbol_table(symbols);
-        free_ast(ast);
-        free_token_array(tokens);
-        free(source_code);
-        return 0;
         free_ast(ast);
         free_token_array(tokens);
         free(source_code);
