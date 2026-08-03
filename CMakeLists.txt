@@ -123,8 +123,27 @@ foreach(example_dir ${EXAMPLE_SUBDIRS})
         DEPENDS clumsyc
         COMMENT "Building example: ${example_name}"
     )
-
     list(APPEND ALL_EXAMPLE_TARGETS build-${example_name})
+
+    # Per-backend variants (default build-${example_name} above is qbe)
+    set(EXAMPLE_BACKENDS qbe aarch64-legacy llvm cranelift)
+    foreach(backend ${EXAMPLE_BACKENDS})
+        add_custom_target(build-${example_name}-${backend}
+            COMMAND ${CMAKE_COMMAND}
+                -DCOMPILER=$<TARGET_FILE:clumsyc>
+                -DEXAMPLE_DIR=${example_dir}
+                "-DTMP_DIR=${CMAKE_BINARY_DIR}/tmp"
+                "-DLINK_LIBS=${EXTRA_LINK_LIBS}"
+                "-DBACKEND=${backend}"
+                "-DLLC=${LLC}"
+                "-DCLIFC=${CLIFC}"
+                -P ${CMAKE_SOURCE_DIR}/example_runner.cmake
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            DEPENDS clumsyc
+            COMMENT "Building example: ${example_name} (${backend})"
+        )
+        list(APPEND ALL_EXAMPLE_BACKEND_TARGETS build-${example_name}-${backend})
+    endforeach()
 endforeach()
 
 add_custom_target(examples
@@ -132,6 +151,13 @@ add_custom_target(examples
 )
 foreach(target ${ALL_EXAMPLE_TARGETS})
     add_dependencies(examples ${target})
+endforeach()
+
+add_custom_target(examples-all-backends
+    COMMENT "Building all examples with all backends"
+)
+foreach(target ${ALL_EXAMPLE_BACKEND_TARGETS})
+    add_dependencies(examples-all-backends ${target})
 endforeach()
 
 # --- Clean ---

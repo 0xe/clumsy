@@ -249,6 +249,17 @@ static void collect_global_ref(ClifEmitter *e, DataList *dl, const char *name) {
 
 static void pre_scan_refs(ClifEmitter *e, DataList *dl) {
     IRProgram *prog = e->prog;
+
+    // Data-only files (globals with no functions, e.g. config.cpl) never hit
+    // the function-body scan below, so their definitions would be lost. Emit
+    // every global defined in this file up front; data_add dedups by name, so
+    // referenced globals keep their first-assigned ids.
+    for (int i = 0; i < prog->num_globals; i++) {
+        if (!prog->globals[i].is_extern) {
+            data_add(dl, prog->globals[i].name, i, NULL);
+        }
+    }
+
     for (int f = 0; f < prog->num_functions; f++) {
         IRFunction *fn = prog->functions[f];
         for (int b = 0; b < fn->num_blocks; b++) {
@@ -990,12 +1001,24 @@ static void emit_data_section(ClifEmitter *e, DataList *dl) {
         const char *linkage = "local";
         bool writable = false;
         bool defined = false;
-        unsigned char bytes[512];
+
+        // Size the buffer to the item (strings/arrays can exceed any fixed cap)
+        int cap = 8;
+        if (d->str_val) {
+            cap = (int)strlen(d->str_val) + 1;
+        } else if (d->global_idx >= 0 && d->global_idx < e->prog->num_globals) {
+            int gi = d->global_idx;
+            if (e->prog->globals[gi].is_string) cap = e->prog->globals[gi].str_val ? (int)strlen(e->prog->globals[gi].str_val) + 1 : 8;
+            else if (e->prog->globals[gi].array_size > 0) cap = e->prog->globals[gi].array_size * 8;
+            else cap = 8;
+        }
+        if (cap < 8) cap = 8;
+        unsigned char *bytes = calloc(cap, 1);
         int byte_len = 0;
 
         if (d->str_val) {
             // String literal: decoded bytes + NUL
-            byte_len = string_bytes(d->str_val, bytes, sizeof(bytes));
+            byte_len = string_bytes(d->str_val, bytes, cap);
             defined = true;
         } else if (d->global_idx >= 0) {
             // Program global
@@ -1016,23 +1039,18 @@ static void emit_data_section(ClifEmitter *e, DataList *dl) {
                         writable = true;
                         defined = true;
                         if (e->prog->globals[gi].is_string) {
-                            byte_len = string_bytes(e->prog->globals[gi].str_val, bytes, sizeof(bytes));
+                            byte_len = string_bytes(e->prog->globals[gi].str_val, bytes, cap);
                         } else {
                             byte_len = 8;
-                            bytes[0] = e->prog->globals[gi].value & 0xFF;
-                            bytes[1] = (e->prog->globals[gi].value >> 8) & 0xFF;
-                            bytes[2] = (e->prog->globals[gi].value >> 16) & 0xFF;
-                            bytes[3] = (e->prog->globals[gi].value >> 24) & 0xFF;
-                            bytes[4] = (e->prog->globals[gi].value >> 32) & 0xFF;
-                            bytes[5] = (e->prog->globals[gi].value >> 40) & 0xFF;
-                            bytes[6] = (e->prog->globals[gi].value >> 48) & 0xFF;
-                            bytes[7] = (e->prog->globals[gi].value >> 56) & 0xFF;
+                            int64_t v = e->prog->globals[gi].value;
+                            for (int k = 0; k < 8; k++) bytes[k] = (v >> (8 * k)) & 0xFF;
                         }
                     } else {
                         int asize = e->prog->globals[gi].array_size * 8;
                         if (asize < 8) asize = 8;
                         fprintf(out, "extern %s r %d\n", n, asize);
                         free(n);
+                        free(bytes);
                         continue;
                     }
                 } else {
@@ -1040,10 +1058,9 @@ static void emit_data_section(ClifEmitter *e, DataList *dl) {
                     writable = true;
                     defined = true;
                     if (e->prog->globals[gi].is_string) {
-                        byte_len = string_bytes(e->prog->globals[gi].str_val, bytes, sizeof(bytes));
+                        byte_len = string_bytes(e->prog->globals[gi].str_val, bytes, cap);
                     } else if (e->prog->globals[gi].array_size > 0) {
                         int n64 = e->prog->globals[gi].array_size;
-                        if (n64 * 8 > (int)sizeof(bytes)) n64 = (int)sizeof(bytes) / 8;
                         byte_len = n64 * 8;
                         for (int j = 0; j < n64; j++) {
                             int64_t v = e->prog->globals[gi].array_values
@@ -1056,9 +1073,7 @@ static void emit_data_section(ClifEmitter *e, DataList *dl) {
                     } else {
                         byte_len = 8;
                         int64_t v = e->prog->globals[gi].value;
-                        for (int k = 0; k < 8; k++) {
-                            bytes[k] = (v >> (8 * k)) & 0xFF;
-                        }
+                        for (int k = 0; k < 8; k++) bytes[k] = (v >> (8 * k)) & 0xFF;
                     }
                 }
             }
@@ -1084,6 +1099,7 @@ static void emit_data_section(ClifEmitter *e, DataList *dl) {
         }
         fprintf(out, "\n");
         free(n);
+        free(bytes);
     }
 }
 

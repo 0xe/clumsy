@@ -170,11 +170,25 @@ Tests with no `.expected` file are compile-smoke tests only.
 
 ## Examples
 
-Example programs live in `examples/`. Build all with:
+Example programs live in `examples/`. Build all (default backend qbe) with:
 
 ```bash
 cmake --build build --target examples
 ```
+
+Build every example with every backend (qbe, aarch64-legacy, llvm, cranelift):
+
+```bash
+cmake --build build --target examples-all-backends
+```
+
+Or a single example/backend combo, e.g.:
+
+```bash
+cmake --build build --target build-tetris-cranelift
+```
+
+Each backend writes to its own dir: `build/tmp/<backend>/<example>.x`.
 
 ## SDL2 on macOS
 

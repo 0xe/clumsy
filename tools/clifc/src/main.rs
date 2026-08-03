@@ -109,22 +109,32 @@ fn run() -> Result<()> {
     }
 
     // Split at the `;; data` marker line: the function part goes to the CLIF
-    // reader, the data part to our own mini-parser.
-    let (func_text, data_text) = match text.find("\n;; data") {
-        Some(idx) => (&text[..idx], &text[idx..]),
-        None => (text.as_str(), ""),
+    // reader, the data part to our own mini-parser. The data section may come
+    // first (a data-only file with no functions), so also match a marker at
+    // the very start of the file.
+    let (func_text, data_text) = if text.starts_with(";; data") {
+        ("", text.as_str())
+    } else {
+        match text.find("\n;; data") {
+            Some(idx) => (&text[..idx], &text[idx..]),
+            None => (text.as_str(), ""),
+        }
     };
 
     let funcs = {
-        let options = ParseOptions {
-            default_calling_convention: CallConv::AppleAarch64,
-            ..Default::default()
-        };
-        parse_test(func_text, options)?
-            .functions
-            .into_iter()
-            .map(|(f, _)| f)
-            .collect::<Vec<_>>()
+        if func_text.trim().is_empty() {
+            Vec::new()
+        } else {
+            let options = ParseOptions {
+                default_calling_convention: CallConv::AppleAarch64,
+                ..Default::default()
+            };
+            parse_test(func_text, options)?
+                .functions
+                .into_iter()
+                .map(|(f, _)| f)
+                .collect::<Vec<_>>()
+        }
     };
 
     let data = parse_data(data_text)?;
