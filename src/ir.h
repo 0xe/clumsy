@@ -256,6 +256,9 @@ void emit_qbe(IRProgram *prog, FILE *out);
 // --- LLVM IR Emission ---
 void emit_llvm(IRProgram *prog, FILE *out);
 
+// --- Cranelift CLIF Emission ---
+void emit_cranelift(IRProgram *prog, FILE *out);
+
 // --- AST → IR Translation ---
 IRProgram *ir_build(ASTNode *ast, SymbolTable *symbols);
 

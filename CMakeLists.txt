@@ -19,6 +19,7 @@ set(COMPILER_SOURCES
     src/ir_build.c
     src/emit_qbe.c
     src/emit_llvm.c
+    src/emit_cranelift.c
     src/cfg.c
 )
 
@@ -52,6 +53,15 @@ if(NOT DEFINED LLC)
     set(LLC ${LLC_EXE})
 endif()
 
+# Cranelift helper (clifc) for the cranelift test backend
+if(NOT DEFINED CLIFC)
+    find_program(CLIFC_EXE clifc)
+    if(NOT CLIFC_EXE)
+        set(CLIFC_EXE "${CMAKE_SOURCE_DIR}/tools/clifc/target/release/clifc")
+    endif()
+    set(CLIFC ${CLIFC_EXE})
+endif()
+
 file(GLOB TEST_FILES "${CMAKE_SOURCE_DIR}/tests/*.cpl")
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/tmp)
 
@@ -63,6 +73,7 @@ foreach(test_file ${TEST_FILES})
         COMMAND ${CMAKE_COMMAND}
             -DCOMPILER=$<TARGET_FILE:clumsyc>
             -DLLC=${LLC}
+            -DCLIFC=${CLIFC}
             -DTEST_FILE=${test_file}
             -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
             -DTEST_DIR=${CMAKE_SOURCE_DIR}/tests

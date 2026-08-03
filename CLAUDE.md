@@ -9,6 +9,11 @@ cmake -B build && cmake --build build
 # binary: ./build/clumsyc
 ```
 
+Backends: `--backend=qbe` (default), `aarch64-legacy`, `llvm`, `cranelift`.
+Cranelift: build `tools/clifc` with cargo, then
+`./build/clumsyc --backend=cranelift prog.cpl > prog.clif` → `clifc prog.clif -o prog.o`
+→ link with clang. See `docs/cranelift-backend.md`.
+
 ## Usage
 
 ```bash

@@ -28,3 +28,9 @@ tcp_server
 working_tetris
 build-llvm/
 build-qbe/
+build-clif/
+build-legacy/
+build-dbg/
+
+# Rust
+tools/clifc/target/

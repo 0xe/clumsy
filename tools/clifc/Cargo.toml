@@ -1,0 +1,17 @@
+[package]
+name = "clifc"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cranelift-codegen = "=0.134.3"
+cranelift-reader = "=0.134.3"
+cranelift-module = "=0.134.3"
+cranelift-object = "=0.134.3"
+cranelift-control = "=0.134.3"
+anyhow = "1"
+target-lexicon = "0.13"
+
+[profile.release]
+lto = true
+strip = true

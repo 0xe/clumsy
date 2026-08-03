@@ -7,7 +7,8 @@
 #   TEST_DIR       path to tests/ (for .expected files)
 #
 # Optional:
-#   BACKEND        "qbe" (default) or "legacy"
+#   BACKEND        "qbe" (default), "legacy", "llvm", or "cranelift"
+#   CLIFC          path to tools/clifc (required for cranelift)
 
 if(NOT DEFINED BACKEND)
     set(BACKEND "qbe")
@@ -86,6 +87,42 @@ elseif(BACKEND STREQUAL "llvm")
 
     execute_process(
         COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.o
+        ERROR_VARIABLE LINK_ERR
+        RESULT_VARIABLE LINK_RC
+    )
+    if(NOT LINK_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (link error): ${LINK_ERR}")
+    endif()
+elseif(BACKEND STREQUAL "cranelift")
+    # Cranelift pipeline: source → CLIF → object → executable
+    execute_process(
+        COMMAND ${COMPILER} --backend=cranelift ${TEST_FILE}
+        OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.clif
+        ERROR_VARIABLE COMPILE_ERR
+        RESULT_VARIABLE COMPILE_RC
+    )
+    if(NOT COMPILE_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
+    endif()
+
+    execute_process(
+        COMMAND ${CLIFC} ${TMP_DIR}/${TEST_NAME}.clif ${TMP_DIR}/${TEST_NAME}.o
+        ERROR_VARIABLE CLIFC_ERR
+        RESULT_VARIABLE CLIFC_RC
+    )
+    if(NOT CLIFC_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (clifc error): ${CLIFC_ERR}")
+    endif()
+
+    # Variadic externs get x8-zeroing stubs written next to the object
+    set(STUB_FILE ${TMP_DIR}/${TEST_NAME}.stubs.s)
+    set(LINK_OBJS ${TMP_DIR}/${TEST_NAME}.o)
+    if(EXISTS ${STUB_FILE})
+        list(APPEND LINK_OBJS ${STUB_FILE})
+    endif()
+
+    execute_process(
+        COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${LINK_OBJS}
         ERROR_VARIABLE LINK_ERR
         RESULT_VARIABLE LINK_RC
     )

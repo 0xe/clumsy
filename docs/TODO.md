@@ -1,15 +1,29 @@
 # TODO
 
-## Current: Cranelift Backend (Phase 6)
+## Completed — Cranelift Backend (Phase 6)
 
-LLVM backend done (40/40). Next: emit the same IR/SSA pipeline to Cranelift.
-Plan in `docs/cranelift-backend.md`.
+Emit the post-SSA IR as CLIF text and compile with `tools/clifc` (cranelift
+0.134.3) to a Mach-O object. Details in `docs/cranelift-backend.md`.
 
-- [ ] **Research Cranelift API** — how to feed SSA IR (func preamble, params,
-      blocks, insts) and emit ARM64 machine code on macOS without LLVM.
-- [ ] **`src/emit_cranelift.c`** — IR → Cranelift builder.
-- [ ] **`--backend=cranelift`** + wiring (main.c, CMakeLists, test_runner).
-- [ ] **Verify** — 40/40 on qbe + aarch64-legacy + llvm + cranelift.
+- [x] **`tools/clifc`** — Rust helper: `.clif` → aarch64 Mach-O `.o` via
+      cranelift-reader + cranelift-object; writes `*.stubs.s` for variadic
+      externs.
+- [x] **`src/emit_cranelift.c`** — IR → CLIF text (brif/jump with block-param
+      args, stack-slot hoisting, symbol_value data refs, stub-named variadics).
+- [x] **`--backend=cranelift`** — `BACKEND_CRANELIFT` in `main.c` + `usage()`.
+- [x] **`CMakeLists.txt` / `test_runner.cmake`** — clifc detection; cranelift
+      branch links `${TEST_NAME}.stubs.s` when present.
+- [x] **Verify** — 40/40 on qbe + aarch64-legacy + llvm + cranelift.
+
+### Gotchas found along the way
+
+- JNZ operand layout is `[cond, then, else]` (emitter read `[1..3]`).
+- Apple AArch64 variadic ABI passes varargs on the stack and clang does not
+  zero x8; cranelift has no variadic support → fixed-arity call + stack-shuffle
+  stub (`_<name>_stub`).
+- `shr` → `ushr`, `brnz` → `brif` in CLIF.
+- Call preamble `fn%d` index is `fn_refs` order, not the `u0:` FuncId.
+- Block headers must use `block_num[block_index_of(b)]`, not the DFS position.
 
 ---
 
