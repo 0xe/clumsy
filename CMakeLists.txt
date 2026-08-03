@@ -18,6 +18,7 @@ set(COMPILER_SOURCES
     src/ir.c
     src/ir_build.c
     src/emit_qbe.c
+    src/emit_llvm.c
     src/cfg.c
 )
 
@@ -42,6 +43,15 @@ if(NOT DEFINED TEST_BACKEND)
     set(TEST_BACKEND "qbe")
 endif()
 
+# LLVM toolchain (llc) for the llvm test backend
+if(NOT DEFINED LLC)
+    find_program(LLC_EXE llc)
+    if(NOT LLC_EXE)
+        set(LLC_EXE "/opt/homebrew/opt/llvm/bin/llc")
+    endif()
+    set(LLC ${LLC_EXE})
+endif()
+
 file(GLOB TEST_FILES "${CMAKE_SOURCE_DIR}/tests/*.cpl")
 file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/tmp)
 
@@ -52,6 +62,7 @@ foreach(test_file ${TEST_FILES})
         NAME ${test_name}
         COMMAND ${CMAKE_COMMAND}
             -DCOMPILER=$<TARGET_FILE:clumsyc>
+            -DLLC=${LLC}
             -DTEST_FILE=${test_file}
             -DTMP_DIR=${CMAKE_BINARY_DIR}/tmp
             -DTEST_DIR=${CMAKE_SOURCE_DIR}/tests

@@ -1050,49 +1050,62 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
         if (stmt->type == AST_EXTERN_DECL) {
             const char *name = stmt->data.list.children[0]->data.string_value;
 
-            if (stmt->data.list.count >= 2 && stmt->data.list.children[1]->type == AST_ARRAY) {
+            if (stmt->data.list.count >= 2 && stmt->data.list.children[1]->type == AST_LIST) {
                 // Function extern: (extern name [params] return_type)
+                // The param list is an AST_LIST (parser.c). A variable extern's
+                // type node (e.g. "int[4]") is also a LIST, but it starts with
+                // the "[]" index-access operator. Distinguish by first child.
                 ASTNode *params_node = stmt->data.list.children[1];
-                IRType ret_type = IR_TYPE_I64;
+                bool is_index_access = false;
+                if (params_node->data.list.count > 0 &&
+                    params_node->data.list.children[0]->type == AST_IDENTIFIER &&
+                    strcmp(params_node->data.list.children[0]->data.string_value, "[]") == 0) {
+                    is_index_access = true;
+                }
+                if (!is_index_access) {
+                    IRType ret_type = IR_TYPE_I64;
 
-                if (stmt->data.list.count >= 3) {
-                    ASTNode *ret_node = stmt->data.list.children[2];
-                    if (ret_node->type == AST_IDENTIFIER) {
-                        if (strcmp(ret_node->data.string_value, "void") == 0) ret_type = IR_TYPE_VOID;
-                        else if (strcmp(ret_node->data.string_value, "int") == 0) ret_type = IR_TYPE_I64;
-                        else if (ret_node->data.string_value[0] == '*') ret_type = IR_TYPE_PTR;
+                    if (stmt->data.list.count >= 3) {
+                        ASTNode *ret_node = stmt->data.list.children[2];
+                        if (ret_node->type == AST_IDENTIFIER) {
+                            if (strcmp(ret_node->data.string_value, "void") == 0) ret_type = IR_TYPE_VOID;
+                            else if (strcmp(ret_node->data.string_value, "int") == 0) ret_type = IR_TYPE_I64;
+                            else if (ret_node->data.string_value[0] == '*') ret_type = IR_TYPE_PTR;
+                        }
                     }
-                }
 
-                int num_params = params_node->data.list.count;
-                IRType *param_types = calloc(num_params, sizeof(IRType));
-                for (int j = 0; j < num_params; j++) {
-                    ASTNode *pt = params_node->data.list.children[j];
-                    if (pt->type == AST_IDENTIFIER) {
-                        if (strcmp(pt->data.string_value, "void") == 0) param_types[j] = IR_TYPE_VOID;
-                        else if (strcmp(pt->data.string_value, "int") == 0) param_types[j] = IR_TYPE_I64;
-                        else if (pt->data.string_value[0] == '*') param_types[j] = IR_TYPE_PTR;
-                        else param_types[j] = IR_TYPE_I64;
-                    } else {
-                        param_types[j] = IR_TYPE_I64;
+                    int num_params = params_node->data.list.count;
+                    IRType *param_types = calloc(num_params, sizeof(IRType));
+                    for (int j = 0; j < num_params; j++) {
+                        ASTNode *pt = params_node->data.list.children[j];
+                        if (pt->type == AST_IDENTIFIER) {
+                            if (strcmp(pt->data.string_value, "void") == 0) param_types[j] = IR_TYPE_VOID;
+                            else if (strcmp(pt->data.string_value, "int") == 0) param_types[j] = IR_TYPE_I64;
+                            else if (pt->data.string_value[0] == '*') param_types[j] = IR_TYPE_PTR;
+                            else param_types[j] = IR_TYPE_I64;
+                        } else {
+                            param_types[j] = IR_TYPE_I64;
+                        }
                     }
-                }
 
-                bool is_variadic = false;
-                if (num_params > 0 && params_node->data.list.children[num_params - 1]->type == AST_IDENTIFIER &&
-                    strcmp(params_node->data.list.children[num_params - 1]->data.string_value, "...") == 0) {
-                    is_variadic = true;
-                    num_params--;
-                }
+                    bool is_variadic = false;
+                    if (num_params > 0 && params_node->data.list.children[num_params - 1]->type == AST_IDENTIFIER &&
+                        strcmp(params_node->data.list.children[num_params - 1]->data.string_value, "...") == 0) {
+                        is_variadic = true;
+                        num_params--;
+                    }
 
-                ir_add_extern(b->prog, name, ret_type, param_types, num_params, is_variadic);
-                free(param_types);
-            } else {
-                // Variable extern: (extern name type)
-                // Add as a global but mark as extern so emitter doesn't emit data
-                ir_add_global(b->prog, name, 0, false, NULL, 0, false);
-                b->prog->globals[b->prog->num_globals - 1].is_extern = true;
+                    ir_add_extern(b->prog, name, ret_type, param_types, num_params, is_variadic);
+                    free(param_types);
+                    continue;
+                }
             }
+
+            // Variable extern: (extern name type) — type is a plain identifier
+            // ("int", "*void") or an index-access node ("int[4]"). Add as a
+            // global but mark as extern so the emitter doesn't emit data.
+            ir_add_global(b->prog, name, 0, false, NULL, 0, false);
+            b->prog->globals[b->prog->num_globals - 1].is_extern = true;
             continue;
         }
 

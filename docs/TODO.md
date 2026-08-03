@@ -1,38 +1,53 @@
 # TODO
 
-## Current: AST → IR → QBE Pipeline
+## Current: Cranelift Backend (Phase 6)
 
-Replace the monolithic `compiler.c` (AST → ARM64) with a proper IR pipeline: **AST → IR → CFG → SSA → scalar opts → backend**.
+LLVM backend done (40/40). Next: emit the same IR/SSA pipeline to Cranelift.
+Plan in `docs/cranelift-backend.md`.
 
-**Phase 0 complete.** Full plan documented in `docs/codegen-rework-plan.md`.
+- [ ] **Research Cranelift API** — how to feed SSA IR (func preamble, params,
+      blocks, insts) and emit ARM64 machine code on macOS without LLVM.
+- [ ] **`src/emit_cranelift.c`** — IR → Cranelift builder.
+- [ ] **`--backend=cranelift`** + wiring (main.c, CMakeLists, test_runner).
+- [ ] **Verify** — 40/40 on qbe + aarch64-legacy + llvm + cranelift.
 
-### Phase 1 — AST → IR → QBE (Full Language Coverage)
+---
 
-Build the complete IR pipeline for all language features in one pass. No Phase 1/Phase 2 split.
+## Completed — LLVM IR Backend (Phase 5)
 
-- [ ] **IR data structures** — `src/ir.h`, `src/ir.c`. IR instructions, operands, basic blocks, functions.
-- [ ] **QBE emitter** — `src/emit_qbe.c`. IR → QBE IL text emission.
-- [ ] **AST→IR translation** — `src/ir_build.c`. Walk AST, emit IR for all node types.
-- [ ] **Backend selection** — Add `--backend=aarch64-legacy|qbe` flag to `src/main.c`.
-- [ ] **Core verification** — Simple test programs compile through QBE, output matches legacy.
-- [ ] **Full verification** — All 40 tests + tetris compile through QBE, output matches legacy.
+Emit LLVM IR from the IR/SSA pipeline and assemble with `llc`. Details in
+`docs/llvm-backend.md`.
 
-### Phase 2 — CFG Construction + Dominator Analysis
+- [x] **`src/emit_llvm.c`** — LLVM IR emitter (`emit_llvm_operand`,
+      `emit_llvm_instr`, `emit_llvm_function`, globals/strings emission).
+- [x] **Call emission** — externs/functions signature resolution; all-i64
+      declares + calls (ARM64 ABI); self-consistent call types; variadic via
+      `...` when a call exceeds fixed params.
+- [x] **`--backend=llvm`** — `BACKEND_LLVM` in `main.c` + `usage()`.
+- [x] **`CMakeLists.txt`** — add `src/emit_llvm.c` + `LLC` detection.
+- [x] **`test_runner.cmake`** — llvm branch: `.ll` → `llc -O1` → `.s` → `.o` → `.x`.
+- [x] **Verify** — 40/40 on qbe + aarch64-legacy + llvm.
 
-- [ ] **Dominance tree** — compute immediate dominators for each function's CFG.
+### Gotchas found along the way
 
-- [ ] **Dominance frontiers** — needed for phi insertion in Phase 3.
+- Extern param lists parse as `AST_LIST` (not `AST_ARRAY`); the ir_build check
+  was wrong, so function externs were silently stored as extern *variable*
+  globals (masked on QBE). Fixed in `ir_build.c` (distinguish `[]` index-access).
+- LLVM c-strings don't decode `\n`/`\t`/`\x`; strings are emitted as explicit
+  `[i8 ...]` byte arrays with exact decoded length.
+- Block refs need `%`; `ptrtoint` constant exprs need parens; variadic args need
+  explicit types; call type fixed-count must equal arg count.
+- LLVM 21 rejects `%0` param shadowing — keep source param names.
+- Extern-variable globals are skipped entirely (redefine same-file `let`
+  globals otherwise).
 
-### Phase 3 — SSA Construction
+## Completed — AST → IR → QBE → SSA pipeline
 
-- [ ] **Φ insertion** — place φ-nodes at dominance frontiers for every variable with
-  multiple reaching definitions.
-
-- [ ] **Variable renaming** — version variables along dominance tree traversal.
-  Each version maps to a unique SSA name.
-
-- [ ] **SSA verifier** — sanity check: every `load` dominates all uses, every `phi` is at
-  a proper frontier, no undefined variable references.
+**Phases 0–3 done** (`docs/codegen-rework-plan.md`):
+- Phase 1: AST → IR → QBE (full language coverage) — 40/40
+- Phase 2: CFG construction, dominator tree, dominance frontiers
+- Phase 3: SSA construction (dominator-tree rename; phis need liveness, not in pipeline)
+- SSA runs before emission via `cfg_ssa_pipeline`; `--dump-cfg`, `--dump-ssa` flags
 
 ### Phase 4 — Scalar Optimizations (on SSA)
 
@@ -46,14 +61,6 @@ Build the complete IR pipeline for all language features in one pass. No Phase 1
   with `y` (within dominance constraints).
 
 - [ ] **Strength reduction** — `mul by power of 2` → `lsl`, `div by power of 2` → `asr`.
-
-### Phase 5 — Future Backends
-
-- [ ] **QBE backend** — map IR to QBE's SSA-like IR text format, pipe to `qbe` compiler.
-
-- [ ] **LLVM backend** (optional) — map IR to LLVM C API or textual IR.
-
-- [ ] **Native ARM64 backend** — register allocation, instruction selection, ABI compliance.
 
 ---
 

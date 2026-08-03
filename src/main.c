@@ -8,17 +8,18 @@
 
 typedef enum {
     BACKEND_ARM64,
-    BACKEND_QBE
+    BACKEND_QBE,
+    BACKEND_LLVM
 } Backend;
 
 void usage(const char *program_name) {
-    fprintf(stderr, "usage: %s [--debug] [--dump-cfg] [--dump-ssa] [--backend=aarch64-legacy|qbe] <source_file>\n", program_name);
+    fprintf(stderr, "usage: %s [--debug] [--dump-cfg] [--dump-ssa] [--backend=aarch64-legacy|qbe|llvm] <source_file>\n", program_name);
     fprintf(stderr, "compile clumsy to assembly\n");
     fprintf(stderr, "options:\n");
     fprintf(stderr, "  --debug                              print syntax tree and symbol table to stderr\n");
     fprintf(stderr, "  --dump-cfg                           print CFG as Graphviz DOT to stdout\n");
     fprintf(stderr, "  --dump-ssa                           run SSA pipeline and print IR to stderr\n");
-    fprintf(stderr, "  --backend=aarch64-legacy|qbe          select backend (default: qbe)\n");
+    fprintf(stderr, "  --backend=aarch64-legacy|qbe|llvm    select backend (default: qbe)\n");
     exit(1);
 }
 
@@ -72,6 +73,8 @@ int main(int argc, char *argv[]) {
                 backend = BACKEND_ARM64;
             } else if (strcmp(name, "qbe") == 0) {
                 backend = BACKEND_QBE;
+            } else if (strcmp(name, "llvm") == 0) {
+                backend = BACKEND_LLVM;
             } else {
                 fprintf(stderr, "error: unknown backend '%s'\n", name);
                 usage(argv[0]);
@@ -120,7 +123,7 @@ int main(int argc, char *argv[]) {
         print_symbol_table(symbols);
     }
     
-    if (backend == BACKEND_QBE) {
+    if (backend == BACKEND_QBE || backend == BACKEND_LLVM) {
         IRProgram *prog = ir_build(ast, symbols);
         if (!prog) {
             fprintf(stderr, "error: IR construction failed\n");
@@ -173,7 +176,11 @@ int main(int argc, char *argv[]) {
             return 0;
         }
 
-        emit_qbe(prog, stdout);
+        if (backend == BACKEND_QBE) {
+            emit_qbe(prog, stdout);
+        } else {
+            emit_llvm(prog, stdout);
+        }
         fflush(stdout);
         free_ir_program(prog);
         free_symbol_table(symbols);

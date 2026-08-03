@@ -54,6 +54,44 @@ if(BACKEND STREQUAL "qbe")
     if(NOT LINK_RC EQUAL 0)
         message(FATAL_ERROR "FAIL (link error): ${LINK_ERR}")
     endif()
+elseif(BACKEND STREQUAL "llvm")
+    # LLVM pipeline: source → LLVM IR → assembly → object → executable
+    execute_process(
+        COMMAND ${COMPILER} --backend=llvm ${TEST_FILE}
+        OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.ll
+        ERROR_VARIABLE COMPILE_ERR
+        RESULT_VARIABLE COMPILE_RC
+    )
+    if(NOT COMPILE_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
+    endif()
+
+    execute_process(
+        COMMAND ${LLC} -O1 -o ${TMP_DIR}/${TEST_NAME}.s ${TMP_DIR}/${TEST_NAME}.ll
+        ERROR_VARIABLE LLC_ERR
+        RESULT_VARIABLE LLC_RC
+    )
+    if(NOT LLC_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (llc error): ${LLC_ERR}")
+    endif()
+
+    execute_process(
+        COMMAND clang -c -o ${TMP_DIR}/${TEST_NAME}.o ${TMP_DIR}/${TEST_NAME}.s
+        ERROR_VARIABLE ASM_ERR
+        RESULT_VARIABLE ASM_RC
+    )
+    if(NOT ASM_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (assemble error): ${ASM_ERR}")
+    endif()
+
+    execute_process(
+        COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.o
+        ERROR_VARIABLE LINK_ERR
+        RESULT_VARIABLE LINK_RC
+    )
+    if(NOT LINK_RC EQUAL 0)
+        message(FATAL_ERROR "FAIL (link error): ${LINK_ERR}")
+    endif()
 else()
     # Legacy ARM64 pipeline: source → assembly → executable
     execute_process(

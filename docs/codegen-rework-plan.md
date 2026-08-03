@@ -254,7 +254,7 @@ Start with simple arithmetic programs, verify through QBE pipeline. Then extend 
 
 ---
 
-## Phase 2: CFG Construction + Dominator Analysis
+## Phase 2: CFG Construction + Dominator Analysis (COMPLETE)
 
 This is where the learning begins (Weeks 2-4 of the reading guide).
 
@@ -295,7 +295,7 @@ Print dominator tree and dominance frontiers. Compare with hand-computed results
 
 ---
 
-## Phase 3: SSA Construction
+## Phase 3: SSA Construction (COMPLETE — see note below)
 
 Core learning exercise (Weeks 5-8 of the reading guide). Implements the Braun et al. 2013 algorithm.
 
@@ -347,6 +347,17 @@ Print SSA IR for test programs. Verify:
 - Every use reaches its definition (dominance property)
 - Phi functions are at correct locations (dominance frontiers)
 
+### Implementation status
+
+Built in `src/cfg.c` as the **dominator-tree DFS rename** (`cfg_ssa_rename`)
+instead of Braun et al.: compute dominators (`cfg_compute_dominators`),
+dominance frontiers (`cfg_compute_dominance_frontiers`), then rename along the
+dominator tree. `cfg_place_phis` exists but is **not in the pipeline** — the
+memory-based IR (every variable is an `alloca` slot) means alloc pointers serve
+as merge points, so phis aren't needed for correctness; phi placement would
+require liveness analysis. Wired in via `cfg_ssa_pipeline` in `main.c` before
+emission; `--dump-ssa` prints SSA IR + dominator tree + frontiers.
+
 ---
 
 ## Phase 4: Scalar Optimizations
@@ -395,9 +406,12 @@ void ir_optimize(IRFunction *fn) {
 
 After Phase 3 is solid, add backends incrementally:
 
-### LLVM IR Emission
+### LLVM IR Emission — IN PROGRESS
 
-Similar to QBE emission but targets LLVM IR text format. More complex but gives access to LLVM's full optimization pipeline. Can use `llc` as the backend tool.
+Detailed plan in `docs/llvm-backend.md`. Mirrors `emit_qbe.c` with a new
+`src/emit_llvm.c`, `--backend=llvm`, and an `llc`-based test pipeline. LLVM 18
+opaque-pointer conventions; all IR values map to `i64`, boundary conversion via
+`inttoptr`/`ptrtoint`.
 
 ### Cranelift
 
@@ -418,13 +432,13 @@ Register allocation, instruction selection, ABI compliance. The most complex opt
 
 ```
 ./clumsyc --backend=aarch64-legacy source.cpl    # Old direct ARM64 (macOS only)
-./clumsyc --backend=qbe source.cpl               # IR → QBE IL → assemble
-./clumsyc --backend=qbe --opt source.cpl         # With scalar optimizations
-./clumsyc --backend=llvm source.cpl               # (future) IR → LLVM IR → assemble
+./clumsyc --backend=qbe source.cpl               # IR → QBE IL → assemble  (DEFAULT)
+./clumsyc --backend=llvm source.cpl              # IR → LLVM IR → assemble (in progress)
+./clumsyc --backend=qbe --opt source.cpl         # With scalar optimizations (future)
 ./clumsyc --backend=cranelift source.cpl          # (future) IR → CLIF → assemble
 ```
 
-Default: `aarch64-legacy` (existing behavior). Switch to `qbe` once the new pipeline is stable.
+Default: `qbe`.
 
 ---
 
@@ -454,9 +468,10 @@ Verification checkpoints:
 | `src/ir.c` | 1 | IR construction helpers |
 | `src/ir_build.c` | 1 | AST → IR translation |
 | `src/emit_qbe.c` | 1 | IR → QBE IL text |
-| `src/cfg.c` | 2 | CFG construction, dominator tree, dominance frontiers |
-| `src/ssa.c` | 3 | SSA construction (Braun et al.) |
+| `src/cfg.c` | 2-3 | CFG construction, dominator tree, dominance frontiers, SSA rename |
+| `src/emit_llvm.c` | 5 | IR → LLVM IR text (in progress) |
 | `src/ir_opt.c` | 4 | Scalar optimization passes |
+| `docs/llvm-backend.md` | 5 | LLVM backend implementation plan |
 | `tests/ir/` | 1-4 | IR-level test cases |
 
 ### Modified files

@@ -253,6 +253,9 @@ const char *ir_type_name(IRType type);
 // --- QBE Emission ---
 void emit_qbe(IRProgram *prog, FILE *out);
 
+// --- LLVM IR Emission ---
+void emit_llvm(IRProgram *prog, FILE *out);
+
 // --- AST → IR Translation ---
 IRProgram *ir_build(ASTNode *ast, SymbolTable *symbols);
 
