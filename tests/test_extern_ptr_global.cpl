@@ -1,0 +1,12 @@
+// Test: pointer-typed extern global (regression: (* void)/(* int) extern
+// globals were misclassified as function externs, so reads emitted the
+// global's address instead of loading its value).
+(let ptr (* int) 0)
+
+(extern ptr (* int))
+
+(pub main (fn [] int
+  (set ptr 12345)
+  (let v int ptr)
+  (print v)
+  (ret 0)))

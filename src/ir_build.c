@@ -1050,11 +1050,13 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
         if (stmt->type == AST_EXTERN_DECL) {
             const char *name = stmt->data.list.children[0]->data.string_value;
 
-            if (stmt->data.list.count >= 2 && stmt->data.list.children[1]->type == AST_LIST) {
-                // Function extern: (extern name [params] return_type)
+            if (stmt->data.list.count >= 3 && stmt->data.list.children[1]->type == AST_LIST) {
+                // Function extern: (extern name [params] return_type).
                 // The param list is an AST_LIST (parser.c). A variable extern's
-                // type node (e.g. "int[4]") is also a LIST, but it starts with
-                // the "[]" index-access operator. Distinguish by first child.
+                // type node (e.g. "int[4]" or a pointer "(* void)") is also a
+                // LIST, so a function extern is only unambiguous when a return
+                // type is present (count == 3) — a variable extern always has
+                // count == 2 (name + type).
                 ASTNode *params_node = stmt->data.list.children[1];
                 bool is_index_access = false;
                 if (params_node->data.list.count > 0 &&
