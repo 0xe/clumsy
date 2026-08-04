@@ -20,6 +20,7 @@ set(COMPILER_SOURCES
     src/emit_qbe.c
     src/emit_llvm.c
     src/emit_cranelift.c
+    src/stubs.c
     src/cfg.c
 )
 

@@ -650,6 +650,32 @@ size_t intern_string(CodeGen *codegen, const char *raw_value) {
     return string_index;
 }
 
+// Evaluate a single call argument into a scratch register without clobbering
+// x0..x7 (so later args and the call itself see deterministic values).
+static void emit_call_arg_eval(CodeGen *codegen, ASTNode *arg, SymbolTable *symbols, const char *scratch) {
+    if (arg->type == AST_INT) {
+        emit_mov_immediate(codegen, scratch, arg->data.int_value);
+    } else if (arg->type == AST_CHAR) {
+        emit_mov_immediate(codegen, scratch, (int)arg->data.char_value);
+    } else if (arg->type == AST_IDENTIFIER) {
+        Symbol *arg_sym = find_symbol(symbols, arg->data.string_value);
+        if (arg_sym && (arg_sym->type == SYM_STRUCT || arg_sym->type == SYM_ARRAY)) {
+            int off = get_symbol_offset(symbols, arg->data.string_value);
+            emit_code(codegen, "    mov   %s, sp\n", scratch);
+            emit_code(codegen, "    add   %s, %s, #%d\n", scratch, scratch, off + codegen->sp_displacement);
+        } else {
+            emit_load_variable(codegen, scratch, arg->data.string_value, symbols);
+        }
+    } else if (arg->type == AST_STRING) {
+        size_t string_index = intern_string(codegen, arg->data.string_value);
+        emit_code(codegen, "    adrp   %s, str_%zu@PAGE\n", scratch, string_index);
+        emit_code(codegen, "    add    %s, %s, str_%zu@PAGEOFF\n", scratch, scratch, string_index);
+    } else if (arg->type == AST_LIST) {
+        generate_expression(codegen, arg, symbols);
+        emit_code(codegen, "    mov   %s, x0\n", scratch);
+    }
+}
+
 void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTable *symbols) {
     Symbol *func_symbol = find_symbol_recursive(symbols, op->data.string_value);
     if (!func_symbol || (func_symbol->type != SYM_FUNCTION && func_symbol->type != SYM_C_FUNCTION)) {
@@ -662,36 +688,71 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
     int arg_count = expr->data.list.count - 1;
     if (arg_count < 0) arg_count = 0;
 
-    // Evaluate all args into temporary registers (x10..x17) to avoid clobbering.
-    // Then move them into x0..x7 right before the call.
+    // Detect variadic C calls: printf is always a libc variadic function, and
+    // passing more args than the extern declares passes the extras as varargs.
+    bool variadic = false;
+    if (func_symbol->type == SYM_C_FUNCTION) {
+        const char *cname = func_symbol->type_info.c_function.c_name;
+        if (strcmp(cname, "printf") == 0 || arg_count > func_symbol->type_info.c_function.param_count) {
+            variadic = true;
+        }
+    }
+
+    if (variadic) {
+        // macOS ARM64 variadic ABI: named args in x0..x7, variadic args on the
+        // stack at [sp, #0].. (va_start reads them there). Spill every arg so the
+        // first variadic arg lands at [sp, #0], then keep the block live across
+        // the call. This mirrors the x8-zeroing stub shims used by the qbe,
+        // llvm, and cranelift backends.
+        int spill_size = arg_count * 8;
+        if (spill_size % 16 != 0) spill_size += 16 - (spill_size % 16);
+
+        if (spill_size > 0) {
+            emit_code(codegen, "    sub   sp, sp, #%d\n", spill_size);
+            codegen->sp_displacement += spill_size;
+        }
+
+        // arg0 (the named arg) goes to the last slot; args 1.. are the varargs
+        // at [sp, #0], [sp, #8], ... so va_start finds the first one at [sp].
+        for (int i = 0; i < arg_count && i < 8; i++) {
+            ASTNode *arg = expr->data.list.children[i + 1];
+            int slot = (i == 0 && arg_count > 1) ? (arg_count - 1) * 8 : (i > 0 ? (i - 1) * 8 : 0);
+            emit_call_arg_eval(codegen, arg, symbols, "x9");
+            emit_code(codegen, "    str   x9, [sp, #%d]\n", slot);
+        }
+
+        for (int i = 0; i < arg_count && i < 8; i++) {
+            int slot = (i == 0 && arg_count > 1) ? (arg_count - 1) * 8 : (i > 0 ? (i - 1) * 8 : 0);
+            emit_code(codegen, "    ldr   x%d, [sp, #%d]\n", i, slot);
+        }
+
+        // x8 = number of vector registers passed as varargs (must be 0 here)
+        emit_code(codegen, "    mov   x8, #0\n");
+
+        // Call the function (macOS ABI: _ prefix for all symbols)
+        if (func_symbol->type == SYM_C_FUNCTION) {
+            char *c_func_name = malloc(strlen(func_symbol->type_info.c_function.c_name) + 2);
+            sprintf(c_func_name, "_%s", func_symbol->type_info.c_function.c_name);
+            emit_code(codegen, "    bl    %s\n", c_func_name);
+            free(c_func_name);
+        } else {
+            emit_code(codegen, "    bl    _%s\n", op->data.string_value);
+        }
+
+        // Deallocate spill space AFTER the call (the callee reads it)
+        if (spill_size > 0) {
+            codegen->sp_displacement -= spill_size;
+            emit_code(codegen, "    add   sp, sp, #%d\n", spill_size);
+        }
+        return;
+    }
+
+    // Evaluate all args into a scratch register, spilling each to the stack so
+    // we don't clobber during later evals. Then move them into x0..x7.
     for (int i = 0; i < arg_count && i < 8; i++) {
         ASTNode *arg = expr->data.list.children[i + 1];
-        const char *tmp = (i < 8) ? (char[]){'x', '0' + (char)i, '0' + (char)0, '\0'} : "x9";
-        // Use x10-x17 as scratch to avoid clobbering during evaluation
-        const char *scratch = "x9";
-
-        if (arg->type == AST_INT) {
-            emit_mov_immediate(codegen, scratch, arg->data.int_value);
-        } else if (arg->type == AST_IDENTIFIER) {
-            Symbol *arg_sym = find_symbol(symbols, arg->data.string_value);
-            if (arg_sym && (arg_sym->type == SYM_STRUCT || arg_sym->type == SYM_ARRAY)) {
-                int off = get_symbol_offset(symbols, arg->data.string_value);
-                emit_code(codegen, "    mov   %s, sp\n", scratch);
-                emit_code(codegen, "    add   %s, %s, #%d\n", scratch, scratch, off + codegen->sp_displacement);
-            } else {
-                emit_load_variable(codegen, scratch, arg->data.string_value, symbols);
-            }
-        } else if (arg->type == AST_STRING) {
-            size_t string_index = intern_string(codegen, arg->data.string_value);
-            emit_code(codegen, "    adrp   %s, str_%zu@PAGE\n", scratch, string_index);
-            emit_code(codegen, "    add    %s, %s, str_%zu@PAGEOFF\n", scratch, scratch, string_index);
-        } else if (arg->type == AST_LIST) {
-            generate_expression(codegen, arg, symbols);
-            emit_code(codegen, "    mov   %s, x0\n", scratch);
-        }
-        // Spill to stack so we don't clobber during later evals
-        int spill_offset = i * 8;
-        emit_code(codegen, "    str   %s, [sp, #-16]!\n", scratch);
+        emit_call_arg_eval(codegen, arg, symbols, "x9");
+        emit_code(codegen, "    str   x9, [sp, #-16]!\n");
         codegen->sp_displacement += 16;
     }
 
@@ -1354,7 +1415,8 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
             codegen->sp_displacement += 16;
             emit_code(codegen, "    str   x9, [sp]\n");
 
-            // Call printf
+            // Call printf (x8 = 0: no vector registers passed as varargs)
+            emit_code(codegen, "    mov   x8, #0\n");
             emit_code(codegen, "    bl    _printf\n");
 
             // Restore stack

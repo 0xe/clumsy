@@ -53,6 +53,16 @@ foreach(example_file ${EXAMPLE_FILES})
             message(FATAL_ERROR "FAIL (compile error in ${file_name}): ${COMPILE_ERR}")
         endif()
 
+        # Variadic externs get x8-zeroing stubs (see stubs.c); link if any
+        execute_process(
+            COMMAND ${COMPILER} --emit-stubs ${example_file}
+            OUTPUT_FILE ${BACKEND_DIR}/${file_name}.stubs.s
+            ERROR_QUIET
+        )
+        if(EXISTS ${BACKEND_DIR}/${file_name}.stubs.s)
+            list(APPEND OBJECT_FILES ${BACKEND_DIR}/${file_name}.stubs.s)
+        endif()
+
         execute_process(
             COMMAND qbe -o ${BACKEND_DIR}/${file_name}.s -
             INPUT_FILE ${BACKEND_DIR}/${file_name}.qbe
@@ -81,6 +91,16 @@ foreach(example_file ${EXAMPLE_FILES})
         )
         if(NOT COMPILE_RC EQUAL 0)
             message(FATAL_ERROR "FAIL (compile error in ${file_name}): ${COMPILE_ERR}")
+        endif()
+
+        # Variadic externs get x8-zeroing stubs (see stubs.c); link if any
+        execute_process(
+            COMMAND ${COMPILER} --emit-stubs ${example_file}
+            OUTPUT_FILE ${BACKEND_DIR}/${file_name}.stubs.s
+            ERROR_QUIET
+        )
+        if(EXISTS ${BACKEND_DIR}/${file_name}.stubs.s)
+            list(APPEND OBJECT_FILES ${BACKEND_DIR}/${file_name}.stubs.s)
         endif()
 
         execute_process(

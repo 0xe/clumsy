@@ -1,0 +1,16 @@
+// Regression: variadic printf with %d on Apple AArch64.
+// The variadic ABI passes varargs on the stack; qbe/llvm/cranelift must route
+// these calls through the x8-zeroing stub. printf declared with fixed params
+// ([(* char) int]) and called with extra args is also variadic.
+
+(extern printf [(* char) int] int)
+
+(pub main (fn [] int
+  (printf "%d and %d\n" 42 7)
+  (printf "%s world\n" "hello")
+  (printf "solo\n")
+  (print 99)
+  (print " hi\n")
+  (print 1)
+  (print "\n")
+  (ret 0)))

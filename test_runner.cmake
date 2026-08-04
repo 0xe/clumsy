@@ -28,6 +28,14 @@ if(BACKEND STREQUAL "qbe")
         message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
     endif()
 
+    # Variadic externs get x8-zeroing stubs (see stubs.c); link if any
+    execute_process(
+        COMMAND ${COMPILER} --emit-stubs ${TEST_FILE}
+        OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.stubs.s
+        ERROR_QUIET
+    )
+    set(STUB_FILE ${TMP_DIR}/${TEST_NAME}.stubs.s)
+
     execute_process(
         COMMAND qbe -o ${TMP_DIR}/${TEST_NAME}.s -
         INPUT_FILE ${TMP_DIR}/${TEST_NAME}.qbe
@@ -47,8 +55,13 @@ if(BACKEND STREQUAL "qbe")
         message(FATAL_ERROR "FAIL (assemble error): ${ASM_ERR}")
     endif()
 
+    set(LINK_OBJS ${TMP_DIR}/${TEST_NAME}.o)
+    if(EXISTS ${STUB_FILE})
+        list(APPEND LINK_OBJS ${STUB_FILE})
+    endif()
+
     execute_process(
-        COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.o
+        COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${LINK_OBJS}
         ERROR_VARIABLE LINK_ERR
         RESULT_VARIABLE LINK_RC
     )
@@ -66,6 +79,14 @@ elseif(BACKEND STREQUAL "llvm")
     if(NOT COMPILE_RC EQUAL 0)
         message(FATAL_ERROR "FAIL (compile error): ${COMPILE_ERR}")
     endif()
+
+    # Variadic externs get x8-zeroing stubs (see stubs.c); link if any
+    execute_process(
+        COMMAND ${COMPILER} --emit-stubs ${TEST_FILE}
+        OUTPUT_FILE ${TMP_DIR}/${TEST_NAME}.stubs.s
+        ERROR_QUIET
+    )
+    set(STUB_FILE ${TMP_DIR}/${TEST_NAME}.stubs.s)
 
     execute_process(
         COMMAND ${LLC} -O1 -o ${TMP_DIR}/${TEST_NAME}.s ${TMP_DIR}/${TEST_NAME}.ll
@@ -85,8 +106,13 @@ elseif(BACKEND STREQUAL "llvm")
         message(FATAL_ERROR "FAIL (assemble error): ${ASM_ERR}")
     endif()
 
+    set(LINK_OBJS ${TMP_DIR}/${TEST_NAME}.o)
+    if(EXISTS ${STUB_FILE})
+        list(APPEND LINK_OBJS ${STUB_FILE})
+    endif()
+
     execute_process(
-        COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${TMP_DIR}/${TEST_NAME}.o
+        COMMAND clang -o ${TMP_DIR}/${TEST_NAME}.x ${LINK_OBJS}
         ERROR_VARIABLE LINK_ERR
         RESULT_VARIABLE LINK_RC
     )

@@ -14,12 +14,13 @@ typedef enum {
 } Backend;
 
 void usage(const char *program_name) {
-    fprintf(stderr, "usage: %s [--debug] [--dump-cfg] [--dump-ssa] [--backend=aarch64-legacy|qbe|llvm|cranelift] <source_file>\n", program_name);
+    fprintf(stderr, "usage: %s [--debug] [--dump-cfg] [--dump-ssa] [--emit-stubs] [--backend=aarch64-legacy|qbe|llvm|cranelift] <source_file>\n", program_name);
     fprintf(stderr, "compile clumsy to assembly\n");
     fprintf(stderr, "options:\n");
     fprintf(stderr, "  --debug                              print syntax tree and symbol table to stderr\n");
     fprintf(stderr, "  --dump-cfg                           print CFG as Graphviz DOT to stdout\n");
     fprintf(stderr, "  --dump-ssa                           run SSA pipeline and print IR to stderr\n");
+    fprintf(stderr, "  --emit-stubs                         emit variadic-call stubs (Apple AArch64) to stdout\n");
     fprintf(stderr, "  --backend=aarch64-legacy|qbe|llvm|cranelift  select backend (default: qbe)\n");
     exit(1);
 }
@@ -58,6 +59,7 @@ int main(int argc, char *argv[]) {
     bool debug = false;
     bool dump_cfg = false;
     bool dump_ssa = false;
+    bool emit_stubs = false;
     Backend backend = BACKEND_QBE;
     const char *source_file = NULL;
     
@@ -68,6 +70,8 @@ int main(int argc, char *argv[]) {
             dump_cfg = true;
         } else if (strcmp(argv[i], "--dump-ssa") == 0) {
             dump_ssa = true;
+        } else if (strcmp(argv[i], "--emit-stubs") == 0) {
+            emit_stubs = true;
         } else if (strncmp(argv[i], "--backend=", 10) == 0) {
             const char *name = argv[i] + 10;
             if (strcmp(name, "aarch64-legacy") == 0 || strcmp(name, "arm64") == 0) {
@@ -126,7 +130,7 @@ int main(int argc, char *argv[]) {
         print_symbol_table(symbols);
     }
     
-    if (backend == BACKEND_QBE || backend == BACKEND_LLVM || backend == BACKEND_CRANELIFT) {
+    if (emit_stubs || backend == BACKEND_QBE || backend == BACKEND_LLVM || backend == BACKEND_CRANELIFT) {
         IRProgram *prog = ir_build(ast, symbols);
         if (!prog) {
             fprintf(stderr, "error: IR construction failed\n");
@@ -140,6 +144,17 @@ int main(int argc, char *argv[]) {
         if (debug) {
             fprintf(stderr, "ir:\n");
             ir_print_program(prog, stderr);
+        }
+
+        if (emit_stubs) {
+            emit_variadic_stubs(prog, stdout);
+            fflush(stdout);
+            free_ir_program(prog);
+            free_symbol_table(symbols);
+            free_ast(ast);
+            free_token_array(tokens);
+            free(source_code);
+            return 0;
         }
 
         // Run SSA pipeline on all functions (dominators + rename)

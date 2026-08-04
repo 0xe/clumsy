@@ -262,4 +262,12 @@ void emit_cranelift(IRProgram *prog, FILE *out);
 // --- AST → IR Translation ---
 IRProgram *ir_build(ASTNode *ast, SymbolTable *symbols);
 
+// --- Variadic detection (shared by qbe/llvm emitters and stub emission) ---
+bool ir_call_is_variadic(IRProgram *prog, IRInstr *in);
+bool ir_extern_is_variadic(IRProgram *prog, const char *name);
+bool ir_program_calls(IRProgram *prog, const char *name);
+
+// --- Variadic-call stubs (Apple AArch64) ---
+void emit_variadic_stubs(IRProgram *prog, FILE *out);
+
 #endif // IR_H

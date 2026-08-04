@@ -504,6 +504,74 @@ void ir_print_function(IRFunction *fn, FILE *out) {
     fprintf(out, "}\n\n");
 }
 
+// Whether a call to a global target needs the variadic ABI. True if the call
+// is flagged variadic (print/println builtins), the extern was declared
+// variadic, or more args are passed than the extern declares fixed params
+// (printf called through a non-variadic decl). Own functions are never
+// variadic. This rule mirrors the cranelift backend's mark_call_variadic.
+bool ir_call_is_variadic(IRProgram *prog, IRInstr *in) {
+    if (in->op != IR_CALL || in->args[0].type != OP_GLOBAL) return false;
+    const char *name = in->args[0].global;
+    if (in->is_variadic) return true;
+
+    int nargs = 0;
+    for (int a = 1; a < 8 && in->args[a].type != OP_NONE; a++) nargs++;
+
+    // printf is a libc variadic function even when the source declared it with
+    // fixed params (e.g. [(* char) int]): any call that passes something after
+    // the format string must use the stack-varargs stub.
+    if (strcmp(name, "printf") == 0 && nargs >= 2) return true;
+
+    int ei = -1;
+    for (int i = 0; i < prog->num_externs; i++) {
+        if (strcmp(prog->externs[i].name, name) == 0) { ei = i; break; }
+    }
+    if (ei >= 0 && prog->externs[ei].is_variadic) return true;
+    if (ei >= 0 && nargs > prog->externs[ei].num_params) return true;
+    return false;
+}
+
+// Whether any instruction in the program calls the named global target.
+bool ir_program_calls(IRProgram *prog, const char *name) {
+    for (int f = 0; f < prog->num_functions; f++) {
+        IRFunction *fn = prog->functions[f];
+        for (int b = 0; b < fn->num_blocks; b++) {
+            IRBlock *blk = fn->blocks[b];
+            for (int k = 0; k < blk->num_instrs; k++) {
+                IRInstr *in = &blk->instrs[k];
+                if (in->op == IR_CALL && in->args[0].type == OP_GLOBAL &&
+                    strcmp(in->args[0].global, name) == 0) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+// Whether an extern is treated as variadic: printf is always a libc variadic
+// function, and any extern with at least one variadic call site (see
+// ir_call_is_variadic) is routed entirely through its fixed-arity stub so the
+// emitters never need a mixed direct/stub declaration.
+bool ir_extern_is_variadic(IRProgram *prog, const char *name) {
+    if (strcmp(name, "printf") == 0) return true;
+    for (int f = 0; f < prog->num_functions; f++) {
+        IRFunction *fn = prog->functions[f];
+        for (int b = 0; b < fn->num_blocks; b++) {
+            IRBlock *blk = fn->blocks[b];
+            for (int k = 0; k < blk->num_instrs; k++) {
+                IRInstr *in = &blk->instrs[k];
+                if (in->op == IR_CALL && in->args[0].type == OP_GLOBAL &&
+                    strcmp(in->args[0].global, name) == 0 &&
+                    ir_call_is_variadic(prog, in)) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 void ir_print_program(IRProgram *prog, FILE *out) {
     // Externs
     for (int i = 0; i < prog->num_externs; i++) {

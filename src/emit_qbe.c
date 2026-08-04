@@ -79,7 +79,7 @@ static const char *qbe_cmp_opcode(IROpcode op) {
     }
 }
 
-static void emit_qbe_instr(IRInstr *instr, FILE *out) {
+static void emit_qbe_instr(IRInstr *instr, FILE *out, IRProgram *prog) {
     switch (instr->op) {
         case IR_ADD: case IR_SUB: case IR_MUL: case IR_DIV:
         case IR_AND: case IR_OR: case IR_XOR: case IR_SHL: case IR_SHR:
@@ -178,32 +178,35 @@ static void emit_qbe_instr(IRInstr *instr, FILE *out) {
             break;
 
         case IR_CALL: {
+            bool variadic = ir_call_is_variadic(prog, instr);
             if (instr->dest.type != OP_NONE) {
                 emit_qbe_operand(&instr->dest, out);
                 fprintf(out, " =%s ", qbe_itype(instr->dest_type));
             }
             fprintf(out, "call ");
-            emit_qbe_operand(&instr->args[0], out);
-            fprintf(out, "(");
-
-            // Emit first arg (named param)
-            if (instr->args[1].type != OP_NONE) {
-                fprintf(out, "l ");
-                emit_qbe_operand(&instr->args[1], out);
+            if (variadic) {
+                // Variadic calls go through a fixed-arity stub (see stubs.c);
+                // QBE's own '...' calling convention is not the Apple ABI.
+                char *fname = qbe_sanitize(instr->args[0].global);
+                fprintf(out, "$%s_stub(", fname);
+                free(fname);
+            } else {
+                emit_qbe_operand(&instr->args[0], out);
+                fprintf(out, "(");
             }
 
-            if (instr->is_variadic) {
-                // macOS ARM64 ABI: variadic args go on stack after ...
-                fprintf(out, ", ...");
-                for (int i = 2; i < 8 && instr->args[i].type != OP_NONE; i++) {
-                    fprintf(out, ", l ");
-                    emit_qbe_operand(&instr->args[i], out);
-                }
-            } else {
-                // Non-variadic: all args in registers
-                for (int i = 2; i < 8 && instr->args[i].type != OP_NONE; i++) {
-                    fprintf(out, ", l ");
-                    emit_qbe_operand(&instr->args[i], out);
+            // Always pass all 8 register args so the stub's stack shuffle
+            // sees deterministic values; pad short variadic calls with zeros.
+            int nargs = 0;
+            for (int i = 1; i < 8 && instr->args[i].type != OP_NONE; i++) nargs++;
+            int total = variadic ? 8 : nargs;
+            for (int i = 0; i < total; i++) {
+                if (i > 0) fprintf(out, ", ");
+                fprintf(out, "l ");
+                if (variadic && i >= nargs) {
+                    fprintf(out, "0");
+                } else {
+                    emit_qbe_operand(&instr->args[i + 1], out);
                 }
             }
 
@@ -252,7 +255,7 @@ static void emit_qbe_string_global(const char *name, const char *value, FILE *ou
     }
 }
 
-static void emit_qbe_function(IRFunction *fn, FILE *out) {
+static void emit_qbe_function(IRFunction *fn, FILE *out, IRProgram *prog) {
     if (fn->is_public) fprintf(out, "export ");
     char *fname = qbe_sanitize(fn->name);
     fprintf(out, "function %s $%s(", qbe_type_name(fn->return_type), fname);
@@ -267,7 +270,7 @@ static void emit_qbe_function(IRFunction *fn, FILE *out) {
         fprintf(out, "@%s\n", b->label);
         for (int j = 0; j < b->num_instrs; j++) {
             fprintf(out, "\t");
-            emit_qbe_instr(&b->instrs[j], out);
+            emit_qbe_instr(&b->instrs[j], out, prog);
             fprintf(out, "\n");
         }
     }
@@ -320,6 +323,6 @@ void emit_qbe(IRProgram *prog, FILE *out) {
     if (prog->num_globals > 0 || prog->num_functions > 0) fprintf(out, "\n");
 
     for (int i = 0; i < prog->num_functions; i++) {
-        emit_qbe_function(prog->functions[i], out);
+        emit_qbe_function(prog->functions[i], out, prog);
     }
 }

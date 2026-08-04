@@ -245,38 +245,33 @@ static void emit_llvm_instr(LLVMEmitter *e, IRInstr *instr, IRProgram *prog) {
             int ex = find_extern(prog, func_name);
             int fni = find_function(prog, func_name);
             int nparams = 0;
-            bool is_variadic = false;
             bool is_extern = false;
 
             if (ex >= 0) {
                 is_extern = true;
                 nparams = prog->externs[ex].num_params;
-                is_variadic = prog->externs[ex].is_variadic;
             } else if (fni >= 0) {
                 // Own function: params exchange i64, never converted
                 nparams = prog->functions[fni]->num_params;
-            } else if (strcmp(func_name, "printf") == 0) {
-                // Undeclared printf (print/println builtin): libc variadic
-                is_extern = true;
-                nparams = 1;
-                is_variadic = true;
             }
 
-            // Excess args beyond fixed params make an extern call variadic
+            // A variadic extern routes every call through its fixed-arity stub
+            // (printf is always libc-variadic), so only the stub is declared.
+            bool is_variadic = ir_extern_is_variadic(prog, func_name);
+
             int nargs = 0;
             for (int i = 1; i < 8 && instr->args[i].type != OP_NONE; i++) nargs++;
-            if (is_extern && nargs > nparams) is_variadic = true;
 
             // Self-consistent call type: fixed params must equal the actual
             // number of passed args (llc requires the call type to match its
-            // own argument list). Variadic calls use the declared fixed count.
+            // own argument list). Stub calls are always fixed at 8 args.
             int fixed;
-            if (!is_extern) {
-                fixed = nparams;
-            } else if (is_variadic) {
-                fixed = nparams;
-            } else {
+            if (is_variadic) {
+                fixed = 8;
+            } else if (is_extern) {
                 fixed = nargs;
+            } else {
+                fixed = nparams;
             }
 
             // Result
@@ -288,31 +283,34 @@ static void emit_llvm_instr(LLVMEmitter *e, IRInstr *instr, IRProgram *prog) {
                 fprintf(out, "  call %s (", llvm_value_type(instr->dest_type));
             }
 
-            // Function type: fixed i64 params, then '...' if variadic
+            // Function type: fixed i64 params only (stub calls are fixed,
+            // variadic callees are reached via the fixed-arity stub)
             for (int p = 0; p < fixed; p++) {
                 if (p > 0) fprintf(out, ", ");
                 fprintf(out, "i64");
             }
-            if (is_variadic) {
-                if (fixed > 0) fprintf(out, ", ");
-                fprintf(out, "...");
-            }
             fprintf(out, ") ");
-            emit_operand(&instr->args[0], out);
-            fprintf(out, "(");
+            if (is_variadic) {
+                fprintf(out, "@%s_stub(", func_name);
+            } else {
+                emit_operand(&instr->args[0], out);
+                fprintf(out, "(");
+            }
 
             // Actual args: i64 always. Global (ptr) operands convert with
-            // ptrtoint (constant-expression form with parens). Explicit types
-            // are required on variadic call args and harmless on fixed ones.
-            for (int i = 1; i < 8 && instr->args[i].type != OP_NONE; i++) {
-                if (i > 1) fprintf(out, ", ");
+            // ptrtoint (constant-expression form with parens). Stub calls pad
+            // with zeros so x0-x7 are deterministic at the shim.
+            for (int i = 0; i < fixed; i++) {
+                if (i > 0) fprintf(out, ", ");
                 fprintf(out, "i64 ");
-                if (instr->args[i].type == OP_GLOBAL) {
+                if (i >= nargs) {
+                    fprintf(out, "0");
+                } else if (instr->args[i + 1].type == OP_GLOBAL) {
                     fprintf(out, "ptrtoint (ptr ");
-                    emit_operand(&instr->args[i], out);
+                    emit_operand(&instr->args[i + 1], out);
                     fprintf(out, " to i64)");
                 } else {
-                    emit_operand(&instr->args[i], out);
+                    emit_operand(&instr->args[i + 1], out);
                 }
             }
             fprintf(out, ")");
@@ -507,46 +505,31 @@ static void emit_llvm_function(LLVMEmitter *e, IRFunction *fn, IRProgram *prog) 
 void emit_llvm(IRProgram *prog, FILE *out) {
     // Extern function declarations. All values are i64 in the IR model, so
     // externs are declared all-i64 regardless of their C signature (ARM64
-    // passes i64/ptr identically in x-registers).
+    // passes i64/ptr identically in x-registers). Variadic externs are never
+    // called directly: calls route through the fixed-arity <name>_stub shim
+    // (see stubs.c), so only the stub needs declaring.
+    bool printf_stub_declared = false;
     for (int i = 0; i < prog->num_externs; i++) {
         const char *name = prog->externs[i].name;
         int nparams = prog->externs[i].num_params;
-        bool is_variadic = prog->externs[i].is_variadic;
+        bool is_variadic = ir_extern_is_variadic(prog, name);
 
-        // A call site with more args than declared fixed params is variadic
-        if (!is_variadic) {
-            for (int f = 0; f < prog->num_functions && !is_variadic; f++) {
-                IRFunction *fn = prog->functions[f];
-                for (int b = 0; b < fn->num_blocks && !is_variadic; b++) {
-                    IRBlock *blk = fn->blocks[b];
-                    for (int k = 0; k < blk->num_instrs && !is_variadic; k++) {
-                        if (blk->instrs[k].op == IR_CALL &&
-                            blk->instrs[k].args[0].type == OP_GLOBAL &&
-                            strcmp(blk->instrs[k].args[0].global, name) == 0) {
-                            int nargs = 0;
-                            for (int a = 1; a < 8 && blk->instrs[k].args[a].type != OP_NONE; a++)
-                                nargs++;
-                            if (nargs > nparams) is_variadic = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        fprintf(out, "declare %s @%s(", llvm_value_type(prog->externs[i].return_type), name);
-        for (int p = 0; p < nparams; p++) {
-            if (p > 0) fprintf(out, ", ");
-            fprintf(out, "i64");
-        }
         if (is_variadic) {
-            if (nparams > 0) fprintf(out, ", ");
-            fprintf(out, "...");
+            fprintf(out, "declare %s @%s_stub(i64, i64, i64, i64, i64, i64, i64, i64)\n",
+                    llvm_value_type(prog->externs[i].return_type), name);
+            if (strcmp(name, "printf") == 0) printf_stub_declared = true;
+        } else {
+            fprintf(out, "declare %s @%s(", llvm_value_type(prog->externs[i].return_type), name);
+            for (int p = 0; p < nparams; p++) {
+                if (p > 0) fprintf(out, ", ");
+                fprintf(out, "i64");
+            }
+            fprintf(out, ")\n");
         }
-        fprintf(out, ")\n");
     }
 
-    // Undeclared printf (print/println builtin) needs a libc declaration
-    if (find_extern(prog, "printf") < 0) {
+    // Undeclared printf (print/println builtin) needs its stub declared
+    if (find_extern(prog, "printf") < 0 && !printf_stub_declared) {
         bool uses_printf = false;
         for (int i = 0; i < prog->num_functions && !uses_printf; i++) {
             IRFunction *fn = prog->functions[i];
@@ -561,7 +544,7 @@ void emit_llvm(IRProgram *prog, FILE *out) {
             }
         }
         if (uses_printf) {
-            fprintf(out, "declare i64 @printf(i64, ...)\n");
+            fprintf(out, "declare i64 @printf_stub(i64, i64, i64, i64, i64, i64, i64, i64)\n");
         }
     }
     if (prog->num_externs > 0 || find_extern(prog, "printf") < 0) fprintf(out, "\n");

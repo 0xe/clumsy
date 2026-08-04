@@ -201,16 +201,10 @@ static void mark_variadic(ClifEmitter *e, const char *name) {
 // Mark a call target as needing an x8-zeroing stub: either the call is flagged
 // variadic (print/println), the extern was declared variadic, or more args are
 // passed than the extern declares (printf called through a non-variadic decl).
+// The rule is shared with the qbe/llvm emitters (ir_call_is_variadic).
 static void mark_call_variadic(ClifEmitter *e, IRInstr *in) {
-    if (in->op != IR_CALL || in->args[0].type != OP_GLOBAL) return;
-    const char *name = in->args[0].global;
-    if (in->is_variadic) { mark_variadic(e, name); return; }
-    int ei = find_extern_index(e->prog, name);
-    if (ei >= 0 && e->prog->externs[ei].is_variadic) { mark_variadic(e, name); return; }
-    if (ei >= 0) {
-        int nargs = 0;
-        for (int a = 1; a < 8 && in->args[a].type != OP_NONE; a++) nargs++;
-        if (nargs > e->prog->externs[ei].num_params) mark_variadic(e, name);
+    if (ir_call_is_variadic(e->prog, in)) {
+        mark_variadic(e, in->args[0].global);
     }
 }
 
