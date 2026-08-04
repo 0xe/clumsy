@@ -29,9 +29,11 @@ working_tetris
 build-llvm/
 build-qbe/
 build-clif/
-build-legacy/
+build-asan/
 build-dbg/
+build-legacy/
 build-cranelift/
+cmake-build-*/
 
 # Rust
 tools/clifc/target/

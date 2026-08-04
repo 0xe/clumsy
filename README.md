@@ -5,20 +5,29 @@ A Lisp-style language that compiles to ARM64 assembly (macOS, Apple Silicon).
 ## Quick Start
 
 ```bash
-# Build the compiler
-cmake -B build && cmake --build build
+# Build the compiler (default backend: qbe)
+cmake -B build-qbe && cmake --build build-qbe
 
 # Compile and run a program
-./build/clumsyc hello.cpl > hello.s
+./build-qbe/clumsyc hello.cpl > hello.s
 as -o hello.o hello.s
 cc -o hello hello.o
 ./hello
 
 # Run all tests
-ctest --test-dir build
+ctest --test-dir build-qbe
 
 # Build all examples
-cmake --build build --target examples
+cmake --build build-qbe --target examples
+```
+
+Each backend is tested in its own build dir, configured with `-DTEST_BACKEND`:
+
+```bash
+cmake -B build-qbe        -DTEST_BACKEND=qbe       # default
+cmake -B build-llvm       -DTEST_BACKEND=llvm
+cmake -B build-cranelift  -DTEST_BACKEND=cranelift
+cmake -B build-legacy     -DTEST_BACKEND=aarch64-legacy
 ```
 
 ## Language
@@ -145,9 +154,9 @@ Each `.cpl` file compiles to a `.o`. Use `pub` to export, `extern` to import:
 ```
 
 ```bash
-./build/clumsyc config.cpl > config.s
-./build/clumsyc render.cpl > render.s
-./build/clumsyc main.cpl > main.s
+./build-qbe/clumsyc config.cpl > config.s
+./build-qbe/clumsyc render.cpl > render.s
+./build-qbe/clumsyc main.cpl > main.s
 as -o config.o config.s
 as -o render.o render.s
 as -o main.o main.s
@@ -157,7 +166,7 @@ cc -o game config.o render.o main.o
 The example runner handles this automatically for files in `examples/`:
 
 ```bash
-cmake --build build --target build-tetris
+cmake --build build-qbe --target build-tetris
 ```
 
 ## Examples
@@ -165,7 +174,7 @@ cmake --build build --target build-tetris
 Example programs live in `examples/`. Build all with:
 
 ```bash
-cmake --build build --target examples
+cmake --build build-qbe --target examples
 ```
 
 | Example | Description |
@@ -181,7 +190,7 @@ cmake --build build --target examples
 Regression tests live in `tests/` as `.cpl` + `.expected` pairs. Run via CMake:
 
 ```bash
-cmake --build build && ctest --test-dir build
+cmake --build build-qbe && ctest --test-dir build-qbe
 ```
 
 ## Build Targets
@@ -215,16 +224,20 @@ cmake --build build && ctest --test-dir build
 | Global variables (.data section) | Done |
 | Lexical scoping (nested symbol tables) | Done |
 | String literals (interned in .data) | Done |
+| Variadic printf (all 4 backends, Apple AArch64) | Done |
+| IR → CFG → SSA pipeline (dominance, phi placement) | Done |
+| QBE / LLVM / Cranelift backends | Done |
+| Scalar optimizations (fold, DCE, copy-prop) | Not yet |
 | Float/double | Not yet |
 | Type checking | Not yet |
-| IR → SSA pipeline | Planned |
-| QBE / LLVM backends | Planned |
 
 ## Roadmap
 
 See `docs/TODO.md` for the full plan. Key upcoming work:
 
-1. **IR pipeline** — AST → IR → CFG → SSA → scalar optimizations
-2. **Float/double support** — FP registers, ARM64 FP instructions
+1. **Scalar optimizations on SSA** — constant folding, DCE, copy propagation, strength reduction
+2. **Float/double support** — FP registers (d0–d31), ARM64 FP instructions
 3. **Type checking pass** — separate validation pass before codegen
-4. **QBE/LLVM backends** — portability beyond ARM64/macOS
+
+Note: the language already compiles to ARM64 (aarch64-legacy), QBE IL, LLVM IR,
+and Cranelift CLIF on macOS; see `docs/TODO.md` for per-phase details.

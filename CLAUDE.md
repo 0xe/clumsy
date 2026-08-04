@@ -4,27 +4,37 @@ A Lisp-style language that compiles to ARM64 assembly (macOS, Apple Silicon).
 
 ## Build
 
+Per-backend build dirs (each runs its own test suite via `-DTEST_BACKEND`):
+
 ```bash
-cmake -B build && cmake --build build
-# binary: ./build/clumsyc
+cmake -B build-qbe -DTEST_BACKEND=qbe       # default backend (qbe)
+cmake -B build-llvm -DTEST_BACKEND=llvm
+cmake -B build-cranelift -DTEST_BACKEND=cranelift
+cmake -B build-legacy -DTEST_BACKEND=aarch64-legacy
+cmake --build build-qbe
+# binary: ./build-qbe/clumsyc
 ```
 
 Backends: `--backend=qbe` (default), `aarch64-legacy`, `llvm`, `cranelift`.
 Cranelift: build `tools/clifc` with cargo, then
-`./build/clumsyc --backend=cranelift prog.cpl > prog.clif` → `clifc prog.clif -o prog.o`
+`./build-qbe/clumsyc --backend=cranelift prog.cpl > prog.clif` → `clifc prog.clif -o prog.o`
 → link with clang. See `docs/cranelift-backend.md`.
+
+Variadic externs get fixed-arity `<name>_stub` shims (see `src/stubs.c`): build
+with `clumsyc --emit-stubs prog.cpl > prog.stubs.s` and link it alongside the
+program (the test/example runners do this automatically).
 
 ## Usage
 
 ```bash
-./build/clumsyc [--debug] <source.cpl>   # emits ARM64 assembly to stdout
-./build/clumsyc --debug source.cpl       # also prints AST + symbol table to stderr
+./build-qbe/clumsyc [--debug] <source.cpl>   # emits ARM64 assembly to stdout
+./build-qbe/clumsyc --debug source.cpl       # also prints AST + symbol table to stderr
 ```
 
 ### Full compile → run pipeline
 
 ```bash
-./build/clumsyc prog.cpl > prog.s
+./build-qbe/clumsyc prog.cpl > prog.s
 as -o prog.o prog.s
 clang -o prog prog.o -L/opt/homebrew/lib -lSDL2   # add libs as needed
 ./prog
@@ -163,7 +173,7 @@ while (true) {
 Regression tests live in `tests/` as `.cpl` + `.expected` pairs. Run via CMake:
 
 ```bash
-cmake --build build && ctest --test-dir build
+cmake --build build-qbe && ctest --test-dir build-qbe
 ```
 
 Tests with no `.expected` file are compile-smoke tests only.
@@ -173,22 +183,22 @@ Tests with no `.expected` file are compile-smoke tests only.
 Example programs live in `examples/`. Build all (default backend qbe) with:
 
 ```bash
-cmake --build build --target examples
+cmake --build build-qbe --target examples
 ```
 
 Build every example with every backend (qbe, aarch64-legacy, llvm, cranelift):
 
 ```bash
-cmake --build build --target examples-all-backends
+cmake --build build-qbe --target examples-all-backends
 ```
 
 Or a single example/backend combo, e.g.:
 
 ```bash
-cmake --build build --target build-tetris-cranelift
+cmake --build build-qbe --target build-tetris-cranelift
 ```
 
-Each backend writes to its own dir: `build/tmp/<backend>/<example>.x`.
+Each backend writes to its own dir: `<build-dir>/tmp/<backend>/<example>.x`.
 
 ## SDL2 on macOS
 

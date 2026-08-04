@@ -1,5 +1,25 @@
 # Completed Work
 
+## Variadic `printf` calling convention (all backends)
+
+On Apple's AArch64 ABI, variadic args go on the stack with the first at `[sp]`,
+and `x8` holds the vector-arg count. QBE and LLVM's `...` lowering don't
+produce this convention, and the legacy backend's register-only arg pass
+dropped varargs onto the stack as garbage (only worked by accident).
+
+- QBE / LLVM / Cranelift route variadic calls through fixed-arity `<name>_stub`
+  shims (`src/stubs.c`, `--emit-stubs`, clifc for cranelift) that store
+  `x1..x7` to `[sp,0..48]`, zero `x8`, and tail into the real function.
+- Legacy backend restores the stack-spill scheme for variadic C calls: arg0 at
+  the last slot, varargs at `[sp,#0]..`, block kept live across the call.
+- Shared variadic rules in `src/ir.c` (`ir_call_is_variadic`,
+  `ir_extern_is_variadic`, `ir_program_calls`) unify detection across emitters;
+  stub emission only fires for externs the program actually calls (no duplicate
+  symbols in multi-file examples).
+- Regression test `tests/test_printf_variadic.cpl`; 42/42 on all four backends.
+
+---
+
 ## Phase 0: Missing Control Constructs
 
 ### Logical Operators (short-circuit evaluation)

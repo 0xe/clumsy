@@ -1,5 +1,45 @@
 # TODO
 
+## Completed — Variadic `printf` on all backends (Apple AArch64)
+
+On Apple's AArch64 ABI, variadic args are passed on the stack (first variadic
+arg at `[sp]`), and `x8` must hold the vector-arg count (0 for integer-only).
+Neither QBE nor LLVM's `...` lowering produces this convention, and the legacy
+backend's register-only arg pass dropped the varargs entirely.
+
+- [x] **`src/stubs.c` + `--emit-stubs`** — fixed-arity `<name>_stub` shims that
+      store `x1..x7` to `[sp,0..48]`, zero `x8`, and tail into the real
+      function; `emit_variadic_stubs` only emits a stub when the file actually
+      calls the extern (no duplicate symbols across multi-file programs).
+- [x] **`src/emit_qbe.c`** — variadic calls re-targeted at `$<name>_stub(` with
+      8 zero-padded i64 args.
+- [x] **`src/emit_llvm.c`** — variadic externs declare only the 8-param
+      `@<name>_stub`; every call routes through it (avoids llc
+      "undefined value '@printf'" when mixing direct + stub calls).
+- [x] **`src/emit_cranelift.c`** — `mark_call_variadic` delegates to the shared
+      `ir_call_is_variadic` rule (gains printf/excess-arg detection).
+- [x] **`src/compiler.c` (legacy)** — variadic C calls (printf always, or args >
+      declared params) restore the stack-spill scheme: arg0 at the last slot,
+      varargs at `[sp,#0]..`, block kept live across the call, `x8 = 0`.
+      `print` builtin also zeroes `x8`.
+- [x] **Shared rules in `src/ir.c`** — `ir_call_is_variadic`,
+      `ir_extern_is_variadic`, `ir_program_calls` unify all three IR emitters.
+- [x] **`test_runner.cmake` / `example_runner.cmake`** — generate + link
+      `${name}.stubs.s` for qbe and llvm.
+- [x] **Verify** — 42/42 on qbe, aarch64-legacy, llvm, cranelift; all examples
+      (incl. tetris) build on every backend.
+
+### Gotchas found along the way
+
+- `ir_extern_is_variadic("printf")` is always true, so stub emission must also
+  check the program actually calls printf — otherwise every file in a multi-file
+  example emits `_printf_stub` and the linker reports duplicate symbols.
+- `[(* char) int]` parses as 2 fixed params; `printf` with a lone format string
+  then looks non-variadic per the call-level rule, so printf's "always
+  variadic" rule is required for the 1-arg case.
+
+---
+
 ## Completed — Cranelift Backend (Phase 6)
 
 Emit the post-SSA IR as CLIF text and compile with `tools/clifc` (cranelift
@@ -13,7 +53,7 @@ Emit the post-SSA IR as CLIF text and compile with `tools/clifc` (cranelift
 - [x] **`--backend=cranelift`** — `BACKEND_CRANELIFT` in `main.c` + `usage()`.
 - [x] **`CMakeLists.txt` / `test_runner.cmake`** — clifc detection; cranelift
       branch links `${TEST_NAME}.stubs.s` when present.
-- [x] **Verify** — 40/40 on qbe + aarch64-legacy + llvm + cranelift.
+- [x] **Verify** — 42/42 on qbe + aarch64-legacy + llvm + cranelift.
 
 ### Gotchas found along the way
 
@@ -40,7 +80,7 @@ Emit LLVM IR from the IR/SSA pipeline and assemble with `llc`. Details in
 - [x] **`--backend=llvm`** — `BACKEND_LLVM` in `main.c` + `usage()`.
 - [x] **`CMakeLists.txt`** — add `src/emit_llvm.c` + `LLC` detection.
 - [x] **`test_runner.cmake`** — llvm branch: `.ll` → `llc -O1` → `.s` → `.o` → `.x`.
-- [x] **Verify** — 40/40 on qbe + aarch64-legacy + llvm.
+- [x] **Verify** — 42/42 on qbe + aarch64-legacy + llvm.
 
 ### Gotchas found along the way
 
@@ -58,7 +98,7 @@ Emit LLVM IR from the IR/SSA pipeline and assemble with `llc`. Details in
 ## Completed — AST → IR → QBE → SSA pipeline
 
 **Phases 0–3 done** (`docs/codegen-rework-plan.md`):
-- Phase 1: AST → IR → QBE (full language coverage) — 40/40
+- Phase 1: AST → IR → QBE (full language coverage) — 42/42
 - Phase 2: CFG construction, dominator tree, dominance frontiers
 - Phase 3: SSA construction (dominator-tree rename; phis need liveness, not in pipeline)
 - SSA runs before emission via `cfg_ssa_pipeline`; `--dump-cfg`, `--dump-ssa` flags
