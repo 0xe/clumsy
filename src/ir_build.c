@@ -1,6 +1,6 @@
 #include "ir.h"
 #include "arena.h"
-#include "compiler.h"
+#include "symbol_table.h"
 
 // IR Builder context
 typedef struct {
@@ -161,35 +161,23 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
             const char *op = op_node->data.string_value;
             size_t count = expr->data.list.count;
 
-            // Binary arithmetic (note: *, -, & are handled as prefix when count==2)
-            if (strcmp(op, "+") == 0 ||
-                (strcmp(op, "-") == 0 && count >= 3) ||
-                (strcmp(op, "*") == 0 && count >= 3) ||
-                strcmp(op, "/") == 0 || strcmp(op, "%") == 0 ||
-                (strcmp(op, "&") == 0 && count >= 3) ||
-                (strcmp(op, "|") == 0 && count >= 3) ||
-                strcmp(op, ">>") == 0 || strcmp(op, "<<") == 0) {
-
+            IROpcode binop;
+            bool is_bin = false;
+            if (strcmp(op, "+") == 0) { is_bin = true; binop = IR_ADD; }
+            else if ((strcmp(op, "-") == 0 || strcmp(op, "*") == 0 || strcmp(op, "&") == 0 || strcmp(op, "|") == 0) && count >= 3) {
+                is_bin = true;
+                binop = strcmp(op, "-") == 0 ? IR_SUB : strcmp(op, "*") == 0 ? IR_MUL : strcmp(op, "&") == 0 ? IR_AND : IR_OR;
+            } else if (strcmp(op, "/") == 0) { is_bin = true; binop = IR_DIV; }
+            else if (strcmp(op, "%") == 0) { is_bin = true; binop = IR_MOD; }
+            else if (strcmp(op, ">>") == 0) { is_bin = true; binop = IR_SHR; }
+            else if (strcmp(op, "<<") == 0) { is_bin = true; binop = IR_SHL; }
+            if (is_bin) {
                 if (count < 3) return op_none();
                 IROperand left = ir_build_expr(b, expr->data.list.children[1], symbols);
                 IROperand right = ir_build_expr(b, expr->data.list.children[2], symbols);
-
-                IROpcode opcode;
-                if (strcmp(op, "+") == 0) opcode = IR_ADD;
-                else if (strcmp(op, "-") == 0) opcode = IR_SUB;
-                else if (strcmp(op, "*") == 0) opcode = IR_MUL;
-                else if (strcmp(op, "/") == 0) opcode = IR_DIV;
-                else if (strcmp(op, "%") == 0) opcode = IR_MOD;
-                else if (strcmp(op, "&") == 0) opcode = IR_AND;
-                else if (strcmp(op, "|") == 0) opcode = IR_OR;
-                else if (strcmp(op, ">>") == 0) opcode = IR_SHR;
-                else if (strcmp(op, "<<") == 0) opcode = IR_SHL;
-                else return op_none();
-
                 char *temp = ir_gen_temp(b);
-                ir_emit(b, ir_instr(opcode, op_reg(temp), left, right, op_none(), IR_TYPE_I64));
-                IROperand result = op_reg(temp);
-                return result;
+                ir_emit(b, ir_instr(binop, op_reg(temp), left, right, op_none(), IR_TYPE_I64));
+                return op_reg(temp);
             }
 
             // Exponentiation: (** base exp) → call __clumsy_pow(base, exp)
@@ -546,41 +534,39 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
             return op_none();
         }
 
-        case AST_ADDRESS_OF: {
-            // (& x) - address of variable
-            if (expr->data.list.count >= 2) {
-                ASTNode *operand = expr->data.list.children[1];
-                if (operand->type == AST_IDENTIFIER) {
-                    const char *var_reg = ir_find_var(b, operand->data.string_value);
-                    if (var_reg) {
-                        // Return the pointer directly (alloc already gave us a pointer)
-                        return op_reg(var_reg);
-                    }
-                    // Global - return address
-                    char *temp = ir_gen_temp(b);
-                    ir_emit(b, ir_instr(IR_ADDR, op_reg(temp), op_global(operand->data.string_value), op_none(), op_none(), IR_TYPE_PTR));
-                    return op_reg(temp);
-                }
-            }
-            return op_none();
-        }
-
-        case AST_DEREFERENCE: {
-            // (* ptr) - dereference pointer
-            if (expr->data.list.count >= 2) {
-                IROperand ptr = ir_build_expr(b, expr->data.list.children[1], symbols);
-                char *temp = ir_gen_temp(b);
-                ir_emit(b, ir_instr(IR_LOAD, op_reg(temp), ptr, op_none(), op_none(), IR_TYPE_PTR));
-                return op_reg(temp);
-            }
-            return op_none();
-        }
 
         default:
             return op_none();
     }
 }
 
+
+static void ir_add_global_from_init(IRBuilder *b, const char *name, ASTNode *init_value, ASTNode *type_node, bool is_public) {
+    if (!init_value) {
+        ir_add_global(b->prog, name, 0, false, NULL, 0, is_public);
+        return;
+    }
+    if (init_value->type == AST_INT) {
+        ir_add_global(b->prog, name, init_value->data.int_value, false, NULL, 0, is_public);
+    } else if (init_value->type == AST_STRING) {
+        ir_add_global(b->prog, name, 0, true, init_value->data.string_value, 0, is_public);
+    } else if (init_value->type == AST_ARRAY) {
+        int arr_size = init_value->data.list.count;
+        if (type_node && type_node->type == AST_LIST && type_node->data.list.count >= 3) {
+            ASTNode *size_node = type_node->data.list.children[2];
+            if (size_node->type == AST_INT && size_node->data.int_value > arr_size)
+                arr_size = size_node->data.int_value;
+        }
+        int64_t *vals = arena_calloc(&g_arena_scratch, arr_size, sizeof(int64_t));
+        for (int ai = 0; ai < (int)init_value->data.list.count; ai++) {
+            if (init_value->data.list.children[ai]->type == AST_INT)
+                vals[ai] = init_value->data.list.children[ai]->data.int_value;
+        }
+        ir_add_global_array(b->prog, name, vals, arr_size, is_public);
+    } else {
+        ir_add_global(b->prog, name, 0, false, NULL, 0, is_public);
+    }
+}
 // --- Statement builder ---
 
 // Register an extern declaration (function or variable) into the IR program.
@@ -1028,46 +1014,14 @@ static void ir_build_stmt(IRBuilder *b, ASTNode *stmt, SymbolTable *symbols) {
                 return;
             }
 
-            // Pub - just treat like let for now
             if (strcmp(op, "pub") == 0) {
-                // Delegate to let handling
-                // Reconstruct as let statement
                 if (stmt->data.list.count >= 3) {
                     ASTNode *name_node = stmt->data.list.children[1];
-                    const char *name = name_node->data.string_value;
-
-                    ASTNode *init_value = NULL;
-                    if (stmt->data.list.count == 3) {
-                        init_value = stmt->data.list.children[2];
-                    } else if (stmt->data.list.count >= 4) {
-                        init_value = stmt->data.list.children[3];
-                    }
-
-                    if (init_value && init_value->type == AST_FN) {
-                        // Function - handled at top level
-                        return;
-                    }
-
-                    // Global variable
-                    if (init_value) {
-                        if (init_value->type == AST_INT) {
-                            ir_add_global(b->prog, name, init_value->data.int_value, false, NULL, 0, true);
-                        } else if (init_value->type == AST_STRING) {
-                            ir_add_global(b->prog, name, 0, true, init_value->data.string_value, 0, true);
-                        } else if (init_value->type == AST_ARRAY) {
-                            int arr_size = init_value->data.list.count;
-                            int64_t *vals = arena_calloc(&g_arena_scratch, arr_size, sizeof(int64_t));
-                            for (int ai = 0; ai < arr_size; ai++) {
-                                if (init_value->data.list.children[ai]->type == AST_INT)
-                                    vals[ai] = init_value->data.list.children[ai]->data.int_value;
-                            }
-                            ir_add_global_array(b->prog, name, vals, arr_size, true);
-                        } else {
-                            ir_add_global(b->prog, name, 0, false, NULL, 0, true);
-                        }
-                    } else {
-                        ir_add_global(b->prog, name, 0, false, NULL, 0, true);
-                    }
+                    ASTNode *init_value = stmt->data.list.count == 3 ? stmt->data.list.children[2]
+                                           : stmt->data.list.count >= 4 ? stmt->data.list.children[3] : NULL;
+                    if (init_value && init_value->type == AST_FN) return;
+                    ASTNode *type_node = stmt->data.list.count >= 4 ? stmt->data.list.children[2] : NULL;
+                    ir_add_global_from_init(b, name_node->data.string_value, init_value, type_node, true);
                 }
                 return;
             }
@@ -1257,70 +1211,7 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
                             continue;
                         }
 
-                        // Global variable
-                        if (is_pub) {
-                            if (init_value) {
-                                if (init_value->type == AST_INT) {
-                                    ir_add_global(b->prog, name, init_value->data.int_value, false, NULL, 0, true);
-                                } else if (init_value->type == AST_STRING) {
-                                    ir_add_global(b->prog, name, 0, true, init_value->data.string_value, 0, true);
-                                } else if (init_value->type == AST_ARRAY) {
-                                    int init_count = init_value->data.list.count;
-                                    int arr_size = init_count;
-                                    // Extract declared array size from type node: (type int SIZE)
-                                    if (stmt->data.list.count >= 3) {
-                                        ASTNode *type_node = stmt->data.list.children[2];
-                                        if (type_node->type == AST_LIST && type_node->data.list.count >= 3 &&
-                                            type_node->data.list.children[0]->type == AST_IDENTIFIER &&
-                                            strcmp(type_node->data.list.children[0]->data.string_value, "[]") == 0 &&
-                                            type_node->data.list.children[2]->type == AST_INT) {
-                                            int declared_size = type_node->data.list.children[2]->data.int_value;
-                                            if (declared_size > arr_size) arr_size = declared_size;
-                                        }
-                                    }
-                                    int64_t *vals = arena_calloc(&g_arena_scratch, arr_size, sizeof(int64_t));
-                                    for (int ai = 0; ai < init_count; ai++) {
-                                        if (init_value->data.list.children[ai]->type == AST_INT)
-                                            vals[ai] = init_value->data.list.children[ai]->data.int_value;
-                                    }
-                                    ir_add_global_array(b->prog, name, vals, arr_size, true);
-                                } else {
-                                    ir_add_global(b->prog, name, 0, false, NULL, 0, true);
-                                }
-                            } else {
-                                ir_add_global(b->prog, name, 0, false, NULL, 0, true);
-                            }
-                        }
-                        // Non-pub let at top level - file-private global
-                        else if (init_value) {
-                            if (init_value->type == AST_INT) {
-                                ir_add_global(b->prog, name, init_value->data.int_value, false, NULL, 0, false);
-                            } else if (init_value->type == AST_STRING) {
-                                ir_add_global(b->prog, name, 0, true, init_value->data.string_value, 0, false);
-                            } else if (init_value->type == AST_ARRAY) {
-                                int init_count = init_value->data.list.count;
-                                int arr_size = init_count;
-                                // Extract declared array size from type node
-                                if (stmt->data.list.count >= 3) {
-                                    ASTNode *type_node = stmt->data.list.children[2];
-                                    if (type_node->type == AST_LIST && type_node->data.list.count >= 3 &&
-                                        type_node->data.list.children[0]->type == AST_IDENTIFIER &&
-                                        strcmp(type_node->data.list.children[0]->data.string_value, "[]") == 0 &&
-                                        type_node->data.list.children[2]->type == AST_INT) {
-                                        int declared_size = type_node->data.list.children[2]->data.int_value;
-                                        if (declared_size > arr_size) arr_size = declared_size;
-                                    }
-                                }
-                                int64_t *vals = arena_calloc(&g_arena_scratch, arr_size, sizeof(int64_t));
-                                for (int ai = 0; ai < init_count; ai++) {
-                                    if (init_value->data.list.children[ai]->type == AST_INT)
-                                        vals[ai] = init_value->data.list.children[ai]->data.int_value;
-                                }
-                                ir_add_global_array(b->prog, name, vals, arr_size, false);
-                            } else {
-                                ir_add_global(b->prog, name, 0, false, NULL, 0, false);
-                            }
-                        }
+                        ir_add_global_from_init(b, name, init_value, stmt->data.list.count >= 4 ? stmt->data.list.children[2] : NULL, is_pub);
                     }
                     continue;
                 }
@@ -1330,22 +1221,6 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
 }
 
 // --- Check if AST uses exponentiation ---
-static bool ast_uses_exponentiation(ASTNode *node) {
-    if (!node) return false;
-    if (node->type == AST_FN) {
-        return ast_uses_exponentiation(node->data.fn.body);
-    }
-    if (node->type == AST_LIST && node->data.list.count > 0) {
-        ASTNode *first = node->data.list.children[0];
-        if (first->type == AST_IDENTIFIER && strcmp(first->data.string_value, "**") == 0)
-            return true;
-        for (size_t i = 0; i < node->data.list.count; i++) {
-            if (ast_uses_exponentiation(node->data.list.children[i]))
-                return true;
-        }
-    }
-    return false;
-}
 
 // --- Generate __clumsy_pow helper function using direct IR emission ---
 // Uses stack-based variables for clean loop structure

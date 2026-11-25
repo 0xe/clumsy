@@ -1,6 +1,6 @@
 #include "ir.h"
 #include "arena.h"
-#include <ctype.h>
+#include "emit_common.h"
 
 // CLIF text emitter: post-SSA IR -> cranelift IR text (CLIF)
 //
@@ -44,6 +44,7 @@ typedef struct {
 typedef struct {
     FILE *out;
     IRProgram *prog;
+    IRIndex index;
 
     int num_functions;
     int num_externs;
@@ -107,37 +108,7 @@ static int vreg_number(const char *name) {
     return (int)n;
 }
 
-static char *clif_sanitize(const char *name) {
-    int len = (int)strlen(name);
-    char *s = arena_strdup(&g_arena_scratch, name);
-    for (int i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)s[i];
-        if (!isalnum(c) && c != '_') s[i] = '_';
-    }
-    return s;
-}
 
-static int find_extern_index(IRProgram *prog, const char *name) {
-    for (int i = 0; i < prog->num_externs; i++) {
-        if (strcmp(prog->externs[i].name, name) == 0) return i;
-    }
-    return -1;
-}
-
-static int find_function_index(IRProgram *prog, const char *name) {
-    for (int i = 0; i < prog->num_functions; i++) {
-        if (strcmp(prog->functions[i]->name, name) == 0) return i;
-    }
-    return -1;
-}
-
-static int find_data_index(IRProgram *prog, const char *name) {
-    for (int i = 0; i < prog->num_globals; i++) {
-        if (prog->globals[i].is_struct) continue;
-        if (strcmp(prog->globals[i].name, name) == 0) return i;
-    }
-    return -1;
-}
 
 // Look up a string literal label (str_N) across all functions.
 static const char *find_string_value(IRProgram *prog, const char *label) {
@@ -156,9 +127,9 @@ static const char *find_string_value(IRProgram *prog, const char *label) {
 // (call targets with no declaration, e.g. printf from print/println), then
 // own functions.
 static int func_id_for(ClifEmitter *e, const char *name) {
-    int ei = find_extern_index(e->prog, name);
+    int ei = ir_index_extern(&e->index, name);
     if (ei >= 0) return ei;
-    int fi = find_function_index(e->prog, name);
+    int fi = ir_index_function(&e->index, name);
     if (fi >= 0) return e->prog->num_externs + e->num_implicit + fi;
     // implicit externs appended after explicit ones, in first-use order
     for (int i = 0; i < e->num_implicit; i++) {
@@ -178,14 +149,14 @@ static int func_id_for(ClifEmitter *e, const char *name) {
 // Classify an OP_GLOBAL name as a function reference (returns FuncId, sets
 // *is_func) or data reference.
 static int classify_global(ClifEmitter *e, const char *name, bool *is_func) {
-    if (find_extern_index(e->prog, name) >= 0 ||
-        find_function_index(e->prog, name) >= 0) {
+    if (ir_index_extern(&e->index, name) >= 0 ||
+        ir_index_function(&e->index, name) >= 0) {
         *is_func = true;
         return func_id_for(e, name);
     }
     *is_func = false;
     if (find_string_value(e->prog, name)) return -1; // string data (no global idx)
-    return find_data_index(e->prog, name);
+    return ir_index_global(&e->index, name);
 }
 
 // --- data collection (name -> DataId) ---
@@ -290,74 +261,8 @@ static void pre_scan_refs(ClifEmitter *e, DataList *dl) {
     }
 }
 
-// Decode the next byte at v[i]. If v[i] is the start of a C escape sequence
-// (the IR stores source escapes verbatim, e.g. "\n" as two chars), decode it
-// into one byte. Returns the index of the next byte.
-static int decode_byte(const char *v, int len, int i, unsigned char *out) {
-    unsigned char c = v[i];
-    if (c == '\\' && i + 1 < len) {
-        char es = v[i + 1];
-        int next = i + 2;
-        switch (es) {
-            case 'n': *out = '\n'; return next;
-            case 't': *out = '\t'; return next;
-            case 'r': *out = '\r'; return next;
-            case 'a': *out = '\a'; return next;
-            case 'b': *out = '\b'; return next;
-            case 'f': *out = '\f'; return next;
-            case 'v': *out = '\v'; return next;
-            case '\\': *out = '\\'; return next;
-            case '"': *out = '"'; return next;
-            case '\'': *out = '\''; return next;
-            case 'x': {
-                int val = 0, have = 0;
-                while (next < len && isxdigit((unsigned char)v[next])) {
-                    val = val * 16 + (isdigit((unsigned char)v[next])
-                                          ? v[next] - '0'
-                                          : tolower((unsigned char)v[next]) - 'a' + 10);
-                    next++;
-                    have = 1;
-                }
-                *out = have ? (unsigned char)val : 'x';
-                return next;
-            }
-            default: {
-                int val = 0, have = 0;
-                if (es >= '0' && es <= '7') {
-                    val = es - '0';
-                    have = 1;
-                    while (next < len && have < 3 && v[next] >= '0' && v[next] <= '7') {
-                        val = val * 8 + (v[next] - '0');
-                        next++;
-                        have++;
-                    }
-                }
-                *out = have ? (unsigned char)val : (unsigned char)es;
-                return next;
-            }
-        }
-    }
-    *out = c;
-    return i + 1;
-}
-
-// Write decoded bytes for a source string value (C escapes decoded), +NUL.
-// Returns the byte count written (excluding the NUL-padding to 8).
 static int string_bytes(const char *value, unsigned char *buf, int buf_cap) {
-    const char *v = value;
-    int len = (int)strlen(value);
-    if (len >= 2 && v[0] == '"' && v[len - 1] == '"') {
-        v++;
-        len -= 2;
-    }
-    int n = 0;
-    for (int i = 0; i < len && n < buf_cap - 1;) {
-        unsigned char byte;
-        i = decode_byte(v, len, i, &byte);
-        buf[n++] = byte;
-    }
-    buf[n] = 0; // NUL terminator
-    return n + 1;
+    return emit_string_bytes(value, buf, buf_cap);
 }
 
 // --- per-function value/block pre-scan ---
@@ -691,18 +596,18 @@ static const char *clif_cmp(IROpcode op) {
 }
 
 static IRType callee_return(ClifEmitter *e, const char *name) {
-    int ei = find_extern_index(e->prog, name);
+    int ei = ir_index_extern(&e->index, name);
     if (ei >= 0) return e->prog->externs[ei].return_type;
-    int fi = find_function_index(e->prog, name);
+    int fi = ir_index_function(&e->index, name);
     if (fi >= 0) return e->prog->functions[fi]->return_type;
     return IR_TYPE_I64;
 }
 
 // Number of i64 parameters the callee's CLIF signature declares.
 static int callee_param_count(ClifEmitter *e, const char *name) {
-    int ei = find_extern_index(e->prog, name);
+    int ei = ir_index_extern(&e->index, name);
     if (ei >= 0) return 8; // all externs declared with 8 fixed i64 params
-    int fi = find_function_index(e->prog, name);
+    int fi = ir_index_function(&e->index, name);
     if (fi >= 0) return e->prog->functions[fi]->num_params;
     return 8;
 }
@@ -915,7 +820,7 @@ static void emit_clif_instr(ClifEmitter *e, IRFunction *fn, IRInstr *in) {
 
 static void emit_extern_decl(FILE *out, const char *name, IRType ret, int nparams,
                              bool stub) {
-    char *n = clif_sanitize(name);
+    char *n = emit_sanitize(name);
     fprintf(out, "function %%%s", n);
     if (stub) fprintf(out, "_stub");
     fprintf(out, "(");
@@ -930,7 +835,7 @@ static void emit_cranelift_function(ClifEmitter *e, IRFunction *fn) {
 
     pre_scan_function(e, fn);
 
-    char *fname = clif_sanitize(fn->name);
+    char *fname = emit_sanitize(fn->name);
     fprintf(out, "function %%%s(", fname);
     emit_sig_params(out, fn->num_params);
     fprintf(out, ")");
@@ -1014,7 +919,7 @@ static void emit_data_section(ClifEmitter *e, DataList *dl) {
     fprintf(out, ";; data\n");
     for (int i = 0; i < dl->num; i++) {
         DataRef *d = &dl->items[i];
-        char *n = clif_sanitize(d->name);
+        char *n = emit_sanitize(d->name);
 
         const char *linkage = "local";
         bool writable = false;
@@ -1125,9 +1030,10 @@ void emit_cranelift(IRProgram *prog, FILE *out) {
     ClifEmitter e = {0};
     e.out = out;
     e.prog = prog;
-
-    // Max functions per file (defensive sizing)
+    e.num_externs = prog->num_externs;
     e.num_functions = prog->num_functions;
+    ir_index_init(&e.index, prog, &g_arena_scratch);
+
     e.num_externs = prog->num_externs;
     e.implicit_cap = 16;
     e.implicit = arena_calloc(&g_arena_scratch, e.implicit_cap, sizeof(char *));
