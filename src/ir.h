@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "types.h"
+#include "arena.h"
 
 // --- IR Types ---
 
@@ -239,7 +240,7 @@ void ir_add_struct_global(IRProgram *prog, const char *name, char **fields, int 
 void free_ir_program(IRProgram *prog);
 
 // --- String helpers ---
-char *ir_strdup(const char *s);
+char *ir_strdup(Arena *a, const char *s);
 
 // --- Printing (for debugging) ---
 void ir_print_program(IRProgram *prog, FILE *out);

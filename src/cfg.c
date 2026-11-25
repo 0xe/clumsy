@@ -1,4 +1,5 @@
 #include "cfg.h"
+#include "arena.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -18,8 +19,11 @@ static void add_succ(IRBlock *src, IRBlock *dst) {
         if (src->succs[i] == dst) return;
     }
     if (src->num_succs >= src->succ_capacity) {
+        int old_capacity = src->succ_capacity;
         src->succ_capacity *= 2;
-        src->succs = realloc(src->succs, src->succ_capacity * sizeof(IRBlock *));
+        src->succs = arena_grow(&g_arena_compile, src->succs,
+                                (size_t)old_capacity * sizeof(IRBlock *),
+                                (size_t)src->succ_capacity * sizeof(IRBlock *));
     }
     src->succs[src->num_succs++] = dst;
 }
@@ -30,8 +34,11 @@ static void add_pred(IRBlock *dst, IRBlock *src) {
         if (dst->preds[i] == src) return;
     }
     if (dst->num_preds >= dst->pred_capacity) {
+        int old_capacity = dst->pred_capacity;
         dst->pred_capacity *= 2;
-        dst->preds = realloc(dst->preds, dst->pred_capacity * sizeof(IRBlock *));
+        dst->preds = arena_grow(&g_arena_compile, dst->preds,
+                                (size_t)old_capacity * sizeof(IRBlock *),
+                                (size_t)dst->pred_capacity * sizeof(IRBlock *));
     }
     dst->preds[dst->num_preds++] = src;
 }
@@ -82,14 +89,14 @@ static int compute_rpo(IRFunction *fn) {
     if (n == 0) return 0;
 
     // Map label -> block index for quick lookup
-    int *visited = calloc(n, sizeof(int));
-    int *rpo = calloc(n, sizeof(int));
+    int *visited = arena_calloc(&g_arena_scratch, n, sizeof(int));
+    int *rpo = arena_calloc(&g_arena_scratch, n, sizeof(int));
     int rpo_count = 0;
 
     // DFS-based RPO from entry
     // Use iterative stack to avoid recursion
     typedef struct { IRBlock *blk; int phase; } Frame;
-    Frame *stack = calloc(n * 4, sizeof(Frame));
+    Frame *stack = arena_calloc(&g_arena_scratch, n * 4, sizeof(Frame));
     int sp = 0;
 
     // Push entry
@@ -147,9 +154,6 @@ static int compute_rpo(IRFunction *fn) {
         }
     }
 
-    free(visited);
-    free(rpo);
-    free(stack);
     return rpo_count;
 }
 
@@ -216,9 +220,11 @@ void cfg_compute_dominators(IRFunction *fn) {
         IRBlock *b = fn->blocks[i];
         if (b->idom && b->idom != b) {
             IRBlock *p = b->idom;
+            int old_count = p->num_dom_children;
             p->num_dom_children++;
-            p->dom_children = realloc(p->dom_children,
-                                      p->num_dom_children * sizeof(IRBlock *));
+            p->dom_children = arena_grow(&g_arena_compile, p->dom_children,
+                                         (size_t)old_count * sizeof(IRBlock *),
+                                         (size_t)p->num_dom_children * sizeof(IRBlock *));
             p->dom_children[p->num_dom_children - 1] = b;
         }
     }
@@ -232,9 +238,11 @@ static void add_df(IRBlock *b, IRBlock *df) {
         if (b->dom_frontiers[i] == df) return;
     }
     if (b->num_dom_frontiers >= b->df_capacity) {
+        int old_capacity = b->df_capacity;
         b->df_capacity *= 2;
-        b->dom_frontiers = realloc(b->dom_frontiers,
-                                   b->df_capacity * sizeof(IRBlock *));
+        b->dom_frontiers = arena_grow(&g_arena_compile, b->dom_frontiers,
+                                      (size_t)old_capacity * sizeof(IRBlock *),
+                                      (size_t)b->df_capacity * sizeof(IRBlock *));
     }
     b->dom_frontiers[b->num_dom_frontiers++] = df;
 }
@@ -272,7 +280,7 @@ typedef struct {
 // Collect all variable names defined (via STORE) in the function
 static void collect_var_names(IRFunction *fn, char ***out_names, int *out_count) {
     int capacity = 64;
-    char **names = calloc(capacity, sizeof(char *));
+    char **names = arena_calloc(&g_arena_scratch, capacity, sizeof(char *));
     int count = 0;
 
     for (int i = 0; i < fn->num_blocks; i++) {
@@ -292,9 +300,12 @@ static void collect_var_names(IRFunction *fn, char ***out_names, int *out_count)
                 if (!found) {
                     if (count >= capacity) {
                         capacity *= 2;
-                        names = realloc(names, capacity * sizeof(char *));
+                        int old_capacity = capacity / 2;
+                        names = arena_grow(&g_arena_scratch, names,
+                                           (size_t)old_capacity * sizeof(char *),
+                                           (size_t)capacity * sizeof(char *));
                     }
-                    names[count++] = ir_strdup(instr->dest.reg);
+                    names[count++] = arena_strdup(&g_arena_scratch, instr->dest.reg);
                 }
             }
             // Also check STORE targets (second arg) and LOAD source (first arg)
@@ -310,9 +321,12 @@ static void collect_var_names(IRFunction *fn, char ***out_names, int *out_count)
                     if (!found) {
                         if (count >= capacity) {
                             capacity *= 2;
-                            names = realloc(names, capacity * sizeof(char *));
+                            int old_capacity = capacity / 2;
+                        names = arena_grow(&g_arena_scratch, names,
+                                           (size_t)old_capacity * sizeof(char *),
+                                           (size_t)capacity * sizeof(char *));
                         }
-                        names[count++] = ir_strdup(instr->args[a].reg);
+                        names[count++] = arena_strdup(&g_arena_scratch, instr->args[a].reg);
                     }
                 }
             }
@@ -341,10 +355,10 @@ void cfg_place_phis(IRFunction *fn) {
     for (int v = 0; v < num_vars; v++) {
         const char *name = var_names[v];
 
-        int *worklist = calloc(fn->num_blocks, sizeof(int));
+        int *worklist = arena_calloc(&g_arena_scratch, fn->num_blocks, sizeof(int));
         int wl_count = 0;
-        bool *in_worklist = calloc(fn->num_blocks, sizeof(bool));
-        bool *has_phi = calloc(fn->num_blocks, sizeof(bool));
+        bool *in_worklist = arena_calloc(&g_arena_scratch, fn->num_blocks, sizeof(bool));
+        bool *has_phi = arena_calloc(&g_arena_scratch, fn->num_blocks, sizeof(bool));
 
         // Seed: blocks that define this variable
         for (int i = 0; i < fn->num_blocks; i++) {
@@ -379,14 +393,16 @@ void cfg_place_phis(IRFunction *fn) {
                     for (int p = 0; p < df_block->num_preds && p < 8; p++) {
                         phi.phi_pairs[p * 2] = op_reg(name);
                         phi.phi_pairs[p * 2 + 1].type = OP_BLOCK;
-                        phi.phi_pairs[p * 2 + 1].block = ir_strdup(df_block->preds[p]->label);
+                        phi.phi_pairs[p * 2 + 1].block = ir_strdup(&g_arena_compile, df_block->preds[p]->label);
                     }
 
                     // Ensure capacity
                     if (df_block->num_instrs >= df_block->capacity) {
+                        int old_capacity = df_block->capacity;
                         df_block->capacity *= 2;
-                        df_block->instrs = realloc(df_block->instrs,
-                                                   df_block->capacity * sizeof(IRInstr));
+                        df_block->instrs = arena_grow(&g_arena_compile, df_block->instrs,
+                                                      (size_t)old_capacity * sizeof(IRInstr),
+                                                      (size_t)df_block->capacity * sizeof(IRInstr));
                     }
                     // Shift existing instrs right by 1
                     for (int k = df_block->num_instrs; k > 0; k--) {
@@ -403,15 +419,7 @@ void cfg_place_phis(IRFunction *fn) {
             }
         }
 
-        free(worklist);
-        free(in_worklist);
-        free(has_phi);
     }
-
-    for (int i = 0; i < num_vars; i++) {
-        free(var_names[i]);
-    }
-    free(var_names);
 }
 
 // ==================== SSA Renaming ====================
@@ -426,8 +434,11 @@ typedef struct {
 
 static void var_stack_push(VarStack *s, int version) {
     if (s->top >= s->capacity) {
+        int old_capacity = s->capacity;
         s->capacity *= 2;
-        s->versions = realloc(s->versions, s->capacity * sizeof(int));
+        s->versions = arena_grow(&g_arena_scratch, s->versions,
+                                 (size_t)old_capacity * sizeof(int),
+                                 (size_t)s->capacity * sizeof(int));
     }
     s->versions[s->top++] = version;
 }
@@ -444,10 +455,9 @@ static void rename_operand(IROperand *op, VarStack *stacks, int num_stacks) {
         if (strcmp(op->reg, stacks[i].name) == 0) {
             int v = var_stack_top(&stacks[i]);
             if (v >= 0) {
-                free(op->reg);
                 char buf[32];
                 snprintf(buf, sizeof(buf), "%%v_%d", v);
-                op->reg = ir_strdup(buf);
+                op->reg = ir_strdup(&g_arena_compile, buf);
                 op->type = OP_VREG;
             }
             return;
@@ -463,10 +473,9 @@ static void rename_dest(IROperand *op, VarStack *stacks, int num_stacks, IRFunct
         if (strcmp(op->reg, stacks[i].name) == 0) {
             int new_v = fn->vreg_counter++;
             var_stack_push(&stacks[i], new_v);
-            free(op->reg);
             char buf[32];
             snprintf(buf, sizeof(buf), "%%v_%d", new_v);
-            op->reg = ir_strdup(buf);
+            op->reg = ir_strdup(&g_arena_compile, buf);
             op->type = OP_VREG;
             return;
         }
@@ -531,7 +540,7 @@ static void rename_dfs(IRBlock *b, VarStack *stacks, int num_stacks, IRFunction 
     visited_blocks[b_idx] = true;
 
     // Save stack depths for backtracking
-    int *saved_tops = calloc(num_stacks, sizeof(int));
+    int *saved_tops = arena_calloc(&g_arena_scratch, num_stacks, sizeof(int));
     for (int i = 0; i < num_stacks; i++) {
         saved_tops[i] = stacks[i].top;
     }
@@ -556,7 +565,6 @@ static void rename_dfs(IRBlock *b, VarStack *stacks, int num_stacks, IRFunction 
     for (int i = 0; i < num_stacks; i++) {
         stacks[i].top = saved_tops[i];
     }
-    free(saved_tops);
 }
 
 void cfg_ssa_rename(IRFunction *fn) {
@@ -565,37 +573,30 @@ void cfg_ssa_rename(IRFunction *fn) {
     collect_var_names(fn, &var_names, &num_vars);
 
     if (num_vars == 0) {
-        free(var_names);
         return;
     }
 
     // Initialize version stacks with -1 (undefined)
-    VarStack *stacks = calloc(num_vars, sizeof(VarStack));
+    VarStack *stacks = arena_calloc(&g_arena_scratch, num_vars, sizeof(VarStack));
     for (int i = 0; i < num_vars; i++) {
         stacks[i].name = var_names[i];
         stacks[i].capacity = 8;
-        stacks[i].versions = calloc(stacks[i].capacity, sizeof(int));
+        stacks[i].versions = arena_calloc(&g_arena_scratch, stacks[i].capacity, sizeof(int));
         stacks[i].top = 0;
         var_stack_push(&stacks[i], -1);
     }
 
-    visited_blocks = calloc(fn->num_blocks, sizeof(bool));
+    visited_blocks = arena_calloc(&g_arena_scratch, fn->num_blocks, sizeof(bool));
 
     // DFS rename from entry along dominator tree
     rename_dfs(fn->entry, stacks, num_vars, fn);
 
-    free(visited_blocks);
-
-    for (int i = 0; i < num_vars; i++) {
-        free(stacks[i].versions);
-    }
-    free(stacks);
-    free(var_names);
 }
 
 // ==================== SSA Pipeline ====================
 
 void cfg_ssa_pipeline(IRFunction *fn) {
+    arena_reset(&g_arena_scratch);
     cfg_build(fn);
     cfg_compute_dominators(fn);
     cfg_ssa_rename(fn);

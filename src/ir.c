@@ -2,11 +2,8 @@
 
 // --- String helpers ---
 
-char *ir_strdup(const char *s) {
-    if (!s) return NULL;
-    char *dup = malloc(strlen(s) + 1);
-    strcpy(dup, s);
-    return dup;
+char *ir_strdup(Arena *a, const char *s) {
+    return arena_strdup(a, s);
 }
 
 // --- Operand constructors ---
@@ -27,7 +24,7 @@ IROperand op_imm(int64_t value) {
 IROperand op_reg(const char *name) {
     IROperand o = {0};
     o.type = OP_REGISTER;
-    o.reg = ir_strdup(name);
+    o.reg = ir_strdup(&g_arena_compile, name);
     return o;
 }
 
@@ -37,21 +34,21 @@ IROperand op_vreg(int id) {
     // Encode vreg id as a string "%v_N"
     char buf[32];
     snprintf(buf, sizeof(buf), "%%v_%d", id);
-    o.reg = ir_strdup(buf);
+    o.reg = ir_strdup(&g_arena_compile, buf);
     return o;
 }
 
 IROperand op_block(const char *label) {
     IROperand o = {0};
     o.type = OP_BLOCK;
-    o.block = ir_strdup(label);
+    o.block = ir_strdup(&g_arena_compile, label);
     return o;
 }
 
 IROperand op_global(const char *name) {
     IROperand o = {0};
     o.type = OP_GLOBAL;
-    o.global = ir_strdup(name);
+    o.global = ir_strdup(&g_arena_compile, name);
     return o;
 }
 
@@ -94,19 +91,19 @@ IRInstr ir_phi(IROperand dest, IROperand *pairs, int count, IRType dest_type) {
 // --- Basic block ---
 
 IRBlock *ir_new_block(const char *label) {
-    IRBlock *b = calloc(1, sizeof(IRBlock));
-    b->label = ir_strdup(label);
+    IRBlock *b = arena_calloc(&g_arena_compile, 1, sizeof(IRBlock));
+    b->label = ir_strdup(&g_arena_compile, label);
     b->capacity = 16;
-    b->instrs = calloc(b->capacity, sizeof(IRInstr));
+    b->instrs = arena_calloc(&g_arena_compile, b->capacity, sizeof(IRInstr));
     b->num_instrs = 0;
     b->succ_capacity = 4;
-    b->succs = calloc(b->succ_capacity, sizeof(IRBlock *));
+    b->succs = arena_calloc(&g_arena_compile, b->succ_capacity, sizeof(IRBlock *));
     b->num_succs = 0;
     b->pred_capacity = 4;
-    b->preds = calloc(b->pred_capacity, sizeof(IRBlock *));
+    b->preds = arena_calloc(&g_arena_compile, b->pred_capacity, sizeof(IRBlock *));
     b->num_preds = 0;
     b->df_capacity = 4;
-    b->dom_frontiers = calloc(b->df_capacity, sizeof(IRBlock *));
+    b->dom_frontiers = arena_calloc(&g_arena_compile, b->df_capacity, sizeof(IRBlock *));
     b->num_dom_frontiers = 0;
     return b;
 }
@@ -117,8 +114,11 @@ IROperand ir_new_vreg(IRFunction *fn) {
 
 void ir_append_instr(IRBlock *block, IRInstr instr) {
     if (block->num_instrs >= block->capacity) {
+        int old_capacity = block->capacity;
         block->capacity *= 2;
-        block->instrs = realloc(block->instrs, block->capacity * sizeof(IRInstr));
+        block->instrs = arena_grow(&g_arena_compile, block->instrs,
+                                   (size_t)old_capacity * sizeof(IRInstr),
+                                   (size_t)block->capacity * sizeof(IRInstr));
     }
     block->instrs[block->num_instrs++] = instr;
 }
@@ -126,14 +126,14 @@ void ir_append_instr(IRBlock *block, IRInstr instr) {
 // --- IR Function ---
 
 IRFunction *ir_new_function(const char *name, IRType return_type) {
-    IRFunction *fn = calloc(1, sizeof(IRFunction));
-    fn->name = ir_strdup(name);
+    IRFunction *fn = arena_calloc(&g_arena_compile, 1, sizeof(IRFunction));
+    fn->name = ir_strdup(&g_arena_compile, name);
     fn->return_type = return_type;
     fn->block_capacity = 16;
-    fn->blocks = calloc(fn->block_capacity, sizeof(IRBlock *));
+    fn->blocks = arena_calloc(&g_arena_compile, fn->block_capacity, sizeof(IRBlock *));
     fn->num_blocks = 0;
     fn->string_capacity = 16;
-    fn->strings = calloc(fn->string_capacity, sizeof(fn->strings[0]));
+    fn->strings = arena_calloc(&g_arena_compile, fn->string_capacity, sizeof(fn->strings[0]));
     fn->num_strings = 0;
     fn->label_counter = 0;
     return fn;
@@ -141,8 +141,11 @@ IRFunction *ir_new_function(const char *name, IRType return_type) {
 
 IRBlock *ir_add_block(IRFunction *fn, const char *label) {
     if (fn->num_blocks >= fn->block_capacity) {
+        int old_capacity = fn->block_capacity;
         fn->block_capacity *= 2;
-        fn->blocks = realloc(fn->blocks, fn->block_capacity * sizeof(IRBlock *));
+        fn->blocks = arena_grow(&g_arena_compile, fn->blocks,
+                                (size_t)old_capacity * sizeof(IRBlock *),
+                                (size_t)fn->block_capacity * sizeof(IRBlock *));
     }
     IRBlock *b = ir_new_block(label);
     fn->blocks[fn->num_blocks++] = b;
@@ -156,39 +159,45 @@ void ir_set_entry(IRFunction *fn, IRBlock *block) {
 char *ir_gen_label(IRFunction *fn, const char *prefix) {
     char buf[64];
     snprintf(buf, sizeof(buf), "%s_%d", prefix, fn->label_counter++);
-    return ir_strdup(buf);
+    return ir_strdup(&g_arena_scratch, buf);
 }
 
 void ir_add_string(IRFunction *fn, const char *label, const char *value) {
     if (fn->num_strings >= fn->string_capacity) {
+        int old_capacity = fn->string_capacity;
         fn->string_capacity *= 2;
-        fn->strings = realloc(fn->strings, fn->string_capacity * sizeof(fn->strings[0]));
+        fn->strings = arena_grow(&g_arena_compile, fn->strings,
+                                 (size_t)old_capacity * sizeof(fn->strings[0]),
+                                 (size_t)fn->string_capacity * sizeof(fn->strings[0]));
     }
-    fn->strings[fn->num_strings].label = ir_strdup(label);
-    fn->strings[fn->num_strings].value = ir_strdup(value);
+    fn->strings[fn->num_strings].label = ir_strdup(&g_arena_compile, label);
+    fn->strings[fn->num_strings].value = ir_strdup(&g_arena_compile, value);
     fn->num_strings++;
 }
 
 // --- IR Program ---
 
 IRProgram *ir_new_program(void) {
-    IRProgram *prog = calloc(1, sizeof(IRProgram));
+    IRProgram *prog = arena_calloc(&g_arena_compile, 1, sizeof(IRProgram));
     prog->func_capacity = 16;
-    prog->functions = calloc(prog->func_capacity, sizeof(IRFunction *));
+    prog->functions = arena_calloc(&g_arena_compile, prog->func_capacity, sizeof(IRFunction *));
     prog->num_functions = 0;
     prog->extern_capacity = 16;
-    prog->externs = calloc(prog->extern_capacity, sizeof(prog->externs[0]));
+    prog->externs = arena_calloc(&g_arena_compile, prog->extern_capacity, sizeof(prog->externs[0]));
     prog->num_externs = 0;
     prog->global_capacity = 16;
-    prog->globals = calloc(prog->global_capacity, sizeof(prog->globals[0]));
+    prog->globals = arena_calloc(&g_arena_compile, prog->global_capacity, sizeof(prog->globals[0]));
     prog->num_globals = 0;
     return prog;
 }
 
 IRFunction *ir_add_function(IRProgram *prog, const char *name, IRType ret) {
     if (prog->num_functions >= prog->func_capacity) {
+        int old_capacity = prog->func_capacity;
         prog->func_capacity *= 2;
-        prog->functions = realloc(prog->functions, prog->func_capacity * sizeof(IRFunction *));
+        prog->functions = arena_grow(&g_arena_compile, prog->functions,
+                                     (size_t)old_capacity * sizeof(IRFunction *),
+                                     (size_t)prog->func_capacity * sizeof(IRFunction *));
     }
     IRFunction *fn = ir_new_function(name, ret);
     prog->functions[prog->num_functions++] = fn;
@@ -197,16 +206,19 @@ IRFunction *ir_add_function(IRProgram *prog, const char *name, IRType ret) {
 
 void ir_add_extern(IRProgram *prog, const char *name, IRType ret, IRType *params, int num_params, bool variadic) {
     if (prog->num_externs >= prog->extern_capacity) {
+        int old_capacity = prog->extern_capacity;
         prog->extern_capacity *= 2;
-        prog->externs = realloc(prog->externs, prog->extern_capacity * sizeof(prog->externs[0]));
+        prog->externs = arena_grow(&g_arena_compile, prog->externs,
+                                   (size_t)old_capacity * sizeof(prog->externs[0]),
+                                   (size_t)prog->extern_capacity * sizeof(prog->externs[0]));
     }
     int i = prog->num_externs++;
-    prog->externs[i].name = ir_strdup(name);
+    prog->externs[i].name = ir_strdup(&g_arena_compile, name);
     prog->externs[i].return_type = ret;
     prog->externs[i].num_params = num_params;
     prog->externs[i].is_variadic = variadic;
     if (num_params > 0) {
-        prog->externs[i].param_types = calloc(num_params, sizeof(IRType));
+        prog->externs[i].param_types = arena_calloc(&g_arena_compile, num_params, sizeof(IRType));
         memcpy(prog->externs[i].param_types, params, num_params * sizeof(IRType));
     } else {
         prog->externs[i].param_types = NULL;
@@ -215,14 +227,17 @@ void ir_add_extern(IRProgram *prog, const char *name, IRType ret, IRType *params
 
 void ir_add_global(IRProgram *prog, const char *name, int64_t value, bool is_string, const char *str_val, int array_size, bool is_public) {
     if (prog->num_globals >= prog->global_capacity) {
+        int old_capacity = prog->global_capacity;
         prog->global_capacity *= 2;
-        prog->globals = realloc(prog->globals, prog->global_capacity * sizeof(prog->globals[0]));
+        prog->globals = arena_grow(&g_arena_compile, prog->globals,
+                                   (size_t)old_capacity * sizeof(prog->globals[0]),
+                                   (size_t)prog->global_capacity * sizeof(prog->globals[0]));
     }
     int i = prog->num_globals++;
-    prog->globals[i].name = ir_strdup(name);
+    prog->globals[i].name = ir_strdup(&g_arena_compile, name);
     prog->globals[i].value = value;
     prog->globals[i].is_string = is_string;
-    prog->globals[i].str_val = str_val ? ir_strdup(str_val) : NULL;
+    prog->globals[i].str_val = str_val ? ir_strdup(&g_arena_compile, str_val) : NULL;
     prog->globals[i].array_size = array_size;
     prog->globals[i].is_public = is_public;
     prog->globals[i].struct_fields = NULL;
@@ -234,11 +249,14 @@ void ir_add_global(IRProgram *prog, const char *name, int64_t value, bool is_str
 
 void ir_add_global_array(IRProgram *prog, const char *name, int64_t *values, int array_size, bool is_public) {
     if (prog->num_globals >= prog->global_capacity) {
+        int old_capacity = prog->global_capacity;
         prog->global_capacity *= 2;
-        prog->globals = realloc(prog->globals, prog->global_capacity * sizeof(prog->globals[0]));
+        prog->globals = arena_grow(&g_arena_compile, prog->globals,
+                                   (size_t)old_capacity * sizeof(prog->globals[0]),
+                                   (size_t)prog->global_capacity * sizeof(prog->globals[0]));
     }
     int i = prog->num_globals++;
-    prog->globals[i].name = ir_strdup(name);
+    prog->globals[i].name = ir_strdup(&g_arena_compile, name);
     prog->globals[i].value = (values && array_size > 0) ? values[0] : 0;
     prog->globals[i].is_string = false;
     prog->globals[i].str_val = NULL;
@@ -249,7 +267,7 @@ void ir_add_global_array(IRProgram *prog, const char *name, int64_t *values, int
     prog->globals[i].is_struct = false;
     prog->globals[i].is_extern = false;
     if (values && array_size > 0) {
-        prog->globals[i].array_values = calloc(array_size, sizeof(int64_t));
+        prog->globals[i].array_values = arena_calloc(&g_arena_compile, array_size, sizeof(int64_t));
         memcpy(prog->globals[i].array_values, values, array_size * sizeof(int64_t));
     } else {
         prog->globals[i].array_values = NULL;
@@ -258,11 +276,14 @@ void ir_add_global_array(IRProgram *prog, const char *name, int64_t *values, int
 
 void ir_add_struct_global(IRProgram *prog, const char *name, char **fields, int num_fields, bool is_public) {
     if (prog->num_globals >= prog->global_capacity) {
+        int old_capacity = prog->global_capacity;
         prog->global_capacity *= 2;
-        prog->globals = realloc(prog->globals, prog->global_capacity * sizeof(prog->globals[0]));
+        prog->globals = arena_grow(&g_arena_compile, prog->globals,
+                                   (size_t)old_capacity * sizeof(prog->globals[0]),
+                                   (size_t)prog->global_capacity * sizeof(prog->globals[0]));
     }
     int i = prog->num_globals++;
-    prog->globals[i].name = ir_strdup(name);
+    prog->globals[i].name = ir_strdup(&g_arena_compile, name);
     prog->globals[i].value = 0;
     prog->globals[i].is_string = false;
     prog->globals[i].str_val = NULL;
@@ -272,82 +293,16 @@ void ir_add_struct_global(IRProgram *prog, const char *name, char **fields, int 
     prog->globals[i].is_extern = false;
     prog->globals[i].array_values = NULL;
     prog->globals[i].num_struct_fields = num_fields;
-    prog->globals[i].struct_fields = calloc(num_fields, sizeof(char *));
+    prog->globals[i].struct_fields = arena_calloc(&g_arena_compile, num_fields, sizeof(char *));
     for (int j = 0; j < num_fields; j++) {
-        prog->globals[i].struct_fields[j] = ir_strdup(fields[j]);
+        prog->globals[i].struct_fields[j] = ir_strdup(&g_arena_compile, fields[j]);
     }
 }
 
 // --- Cleanup ---
 
-static void free_ir_block(IRBlock *b) {
-    if (!b) return;
-    free(b->label);
-    for (int i = 0; i < b->num_instrs; i++) {
-        IRInstr *ins = &b->instrs[i];
-        if (ins->dest.type == OP_REGISTER || ins->dest.type == OP_VREG) free(ins->dest.reg);
-        else if (ins->dest.type == OP_GLOBAL) free(ins->dest.global);
-        for (int j = 0; j < 8; j++) {
-            if (ins->args[j].type == OP_REGISTER || ins->args[j].type == OP_VREG) free(ins->args[j].reg);
-            else if (ins->args[j].type == OP_GLOBAL) free(ins->args[j].global);
-            else if (ins->args[j].type == OP_BLOCK) free(ins->args[j].block);
-        }
-        for (int j = 0; j < ins->phi_count * 2; j++) {
-            if (ins->phi_pairs[j].type == OP_REGISTER || ins->phi_pairs[j].type == OP_VREG) free(ins->phi_pairs[j].reg);
-            else if (ins->phi_pairs[j].type == OP_BLOCK) free(ins->phi_pairs[j].block);
-        }
-    }
-    free(b->instrs);
-    free(b->succs);
-    free(b->preds);
-    free(b->dom_frontiers);
-    free(b);
-}
-
-static void free_ir_function(IRFunction *fn) {
-    if (!fn) return;
-    free(fn->name);
-    for (int i = 0; i < fn->num_blocks; i++) {
-        free_ir_block(fn->blocks[i]);
-    }
-    free(fn->blocks);
-    for (int i = 0; i < fn->num_params; i++) {
-        free(fn->params[i]);
-    }
-    free(fn->params);
-    free(fn->param_types);
-    for (int i = 0; i < fn->num_strings; i++) {
-        free(fn->strings[i].label);
-        free(fn->strings[i].value);
-    }
-    free(fn->strings);
-    free(fn);
-}
-
 void free_ir_program(IRProgram *prog) {
-    if (!prog) return;
-    for (int i = 0; i < prog->num_functions; i++) {
-        free_ir_function(prog->functions[i]);
-    }
-    free(prog->functions);
-    for (int i = 0; i < prog->num_externs; i++) {
-        free(prog->externs[i].name);
-        free(prog->externs[i].param_types);
-    }
-    free(prog->externs);
-    for (int i = 0; i < prog->num_globals; i++) {
-        free(prog->globals[i].name);
-        free(prog->globals[i].str_val);
-        free(prog->globals[i].array_values);
-        if (prog->globals[i].struct_fields) {
-            for (int j = 0; j < prog->globals[i].num_struct_fields; j++) {
-                free(prog->globals[i].struct_fields[j]);
-            }
-            free(prog->globals[i].struct_fields);
-        }
-    }
-    free(prog->globals);
-    free(prog);
+    (void)prog;
 }
 
 // --- Printing ---

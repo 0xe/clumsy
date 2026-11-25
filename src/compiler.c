@@ -1,4 +1,5 @@
 #include "compiler.h"
+#include "arena.h"
 #include <stdarg.h>
 #include <stdint.h>
 
@@ -6,19 +7,11 @@
 static StructTypeTable *global_struct_types = NULL;
 
 CodeGen *create_codegen(void) {
-    CodeGen *codegen = malloc(sizeof(CodeGen));
-    if (!codegen) {
-        fprintf(stderr, "Error: Failed to allocate memory for code generator\n");
-        exit(1);
-    }
-    
+    CodeGen *codegen = arena_calloc(&g_arena_compile, 1, sizeof(CodeGen));
+
     codegen->output_capacity = 4096;
-    codegen->output = malloc(codegen->output_capacity);
-    if (!codegen->output) {
-        fprintf(stderr, "Error: Failed to allocate memory for output buffer\n");
-        exit(1);
-    }
-    
+    codegen->output = arena_alloc(&g_arena_compile, codegen->output_capacity);
+
     codegen->output[0] = '\0';
     codegen->output_size = 0;
     codegen->label_counter = 0;
@@ -35,10 +28,7 @@ CodeGen *create_codegen(void) {
 }
 
 void free_codegen(CodeGen *codegen) {
-    if (codegen) {
-        free(codegen->output);
-        free(codegen);
-    }
+    (void)codegen;
 }
 
 void emit_code(CodeGen *codegen, const char *format, ...) {
@@ -53,12 +43,10 @@ void emit_code(CodeGen *codegen, const char *format, ...) {
     
     // Ensure buffer is large enough
     while (codegen->output_size + needed + 1 >= codegen->output_capacity) {
+        size_t old_capacity = codegen->output_capacity;
         codegen->output_capacity *= 2;
-        codegen->output = realloc(codegen->output, codegen->output_capacity);
-        if (!codegen->output) {
-            fprintf(stderr, "Error: Failed to reallocate output buffer\n");
-            exit(1);
-        }
+        codegen->output = arena_grow(&g_arena_compile, codegen->output,
+                                     old_capacity, codegen->output_capacity);
     }
     
     // Append to buffer
@@ -72,13 +60,13 @@ void emit_code(CodeGen *codegen, const char *format, ...) {
 
 char *new_label(CodeGen *codegen, const char *prefix) {
     codegen->label_counter++;
-    char *label = malloc(strlen(prefix) + 20);
+    char *label = arena_alloc(&g_arena_scratch, strlen(prefix) + 20);
     sprintf(label, ".%s_%d", prefix, codegen->label_counter);
     return label;
 }
 
 static SymbolTable *create_child_scope(SymbolTable *parent) {
-    SymbolTable *child = malloc(sizeof(SymbolTable));
+    SymbolTable *child = arena_calloc(&g_arena_compile, 1, sizeof(SymbolTable));
     child->symbols = NULL;
     child->count = 0;
     child->capacity = 0;
@@ -113,7 +101,7 @@ static void collect_symbols_from_stmt(ASTNode *stmt, SymbolTable *table) {
         ASTNode *name_node = stmt->data.list.children[0];
 
         Symbol symbol = {0};
-        symbol.name = strdup(name_node->data.string_value);
+        symbol.name = arena_strdup(&g_arena_compile, name_node->data.string_value);
         symbol.is_external = true;
         symbol.is_public = false;
         symbol.is_global = true;
@@ -127,7 +115,7 @@ static void collect_symbols_from_stmt(ASTNode *stmt, SymbolTable *table) {
             // Function extern
             ASTNode *params_node = stmt->data.list.children[1];
             symbol.type = SYM_C_FUNCTION;
-            symbol.type_info.c_function.c_name = strdup(name_node->data.string_value);
+            symbol.type_info.c_function.c_name = arena_strdup(&g_arena_compile, name_node->data.string_value);
             symbol.type_info.c_function.return_type = SYM_INT;
             symbol.type_info.c_function.param_count = params_node->data.list.count;
         } else {
@@ -172,7 +160,7 @@ static void collect_symbols_from_stmt(ASTNode *stmt, SymbolTable *table) {
             
             if (name_node->type == AST_IDENTIFIER) {
                 Symbol symbol = {0};
-                symbol.name = strdup(name_node->data.string_value);
+                symbol.name = arena_strdup(&g_arena_compile, name_node->data.string_value);
                 symbol.is_public = is_pub;
                 symbol.is_external = false;
                 symbol.is_global = (table->parent == NULL);  // top-level = global
@@ -192,11 +180,10 @@ static void collect_symbols_from_stmt(ASTNode *stmt, SymbolTable *table) {
                         } else if (strcmp(type_node->data.string_value, "bool") == 0) {
                             symbol.type = SYM_BOOL;
                         } else if (strcmp(type_node->data.string_value, "struct") == 0) {
-                            free(symbol.name);
                             return;
                         } else {
                             symbol.type = SYM_STRUCT;
-                            symbol.type_info.struct_instance.struct_type_name = strdup(type_node->data.string_value);
+                            symbol.type_info.struct_instance.struct_type_name = arena_strdup(&g_arena_compile, type_node->data.string_value);
                         }
                     } else if (type_node->type == AST_LIST && type_node->data.list.count >= 2) {
                         ASTNode *type_op = type_node->data.list.children[0];
@@ -293,12 +280,8 @@ static void collect_symbols_from_stmt(ASTNode *stmt, SymbolTable *table) {
 }
 
 SymbolTable *build_symbol_table(ASTNode *ast) {
-    SymbolTable *table = malloc(sizeof(SymbolTable));
-    if (!table) {
-        fprintf(stderr, "Error: Failed to allocate memory for symbol table\n");
-        exit(1);
-    }
-    
+    SymbolTable *table = arena_calloc(&g_arena_compile, 1, sizeof(SymbolTable));
+
     table->symbols = NULL;
     table->count = 0;
     table->capacity = 0;
@@ -335,12 +318,11 @@ static int symbol_stack_size(Symbol *sym) {
 
 void add_symbol(SymbolTable *table, Symbol symbol) {
     if (table->count >= table->capacity) {
-        table->capacity = table->capacity == 0 ? 16 : table->capacity * 2;
-        table->symbols = realloc(table->symbols, table->capacity * sizeof(Symbol));
-        if (!table->symbols) {
-            fprintf(stderr, "Error: Failed to allocate memory for symbols\n");
-            exit(1);
-        }
+        size_t old_capacity = table->capacity;
+        table->capacity = old_capacity == 0 ? 16 : old_capacity * 2;
+        table->symbols = arena_grow(&g_arena_compile, table->symbols,
+                                    old_capacity * sizeof(Symbol),
+                                    table->capacity * sizeof(Symbol));
     }
     // Global/extern variables live in .data, not on the stack
     if (symbol.is_global || symbol.is_external) {
@@ -404,20 +386,7 @@ int get_symbol_offset(SymbolTable *table, const char *name) {
 }
 
 void free_symbol_table(SymbolTable *table) {
-    if (table) {
-        // Free children
-        SymbolTable *child = table->first_child;
-        while (child) {
-            SymbolTable *next = child->next_sibling;
-            free_symbol_table(child);
-            child = next;
-        }
-        for (size_t i = 0; i < table->count; i++) {
-            free(table->symbols[i].name);
-        }
-        free(table->symbols);
-        free(table);
-    }
+    (void)table;
 }
 
 Symbol *find_symbol_recursive(SymbolTable *table, const char *name) {
@@ -635,7 +604,7 @@ void emit_arithmetic(CodeGen *codegen, const char *op, const char *dest, const c
 size_t intern_string(CodeGen *codegen, const char *raw_value) {
     size_t string_index = codegen->string_count;
     size_t str_len = strlen(raw_value);
-    char *unquoted = malloc(str_len + 1);
+    char *unquoted = arena_alloc(&g_arena_compile, str_len + 1);
     if (str_len >= 2 && raw_value[0] == '"' && raw_value[str_len - 1] == '"') {
         strncpy(unquoted, raw_value + 1, str_len - 2);
         unquoted[str_len - 2] = '\0';
@@ -643,8 +612,11 @@ size_t intern_string(CodeGen *codegen, const char *raw_value) {
         strcpy(unquoted, raw_value);
     }
     if (codegen->string_count >= codegen->string_capacity) {
-        codegen->string_capacity = codegen->string_capacity == 0 ? 16 : codegen->string_capacity * 2;
-        codegen->strings = realloc(codegen->strings, codegen->string_capacity * sizeof(char *));
+        size_t old_capacity = codegen->string_capacity;
+        codegen->string_capacity = old_capacity == 0 ? 16 : old_capacity * 2;
+        codegen->strings = arena_grow(&g_arena_compile, codegen->strings,
+                                      old_capacity * sizeof(char *),
+                                      codegen->string_capacity * sizeof(char *));
     }
     codegen->strings[codegen->string_count++] = unquoted;
     return string_index;
@@ -731,10 +703,9 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
 
         // Call the function (macOS ABI: _ prefix for all symbols)
         if (func_symbol->type == SYM_C_FUNCTION) {
-            char *c_func_name = malloc(strlen(func_symbol->type_info.c_function.c_name) + 2);
+            char *c_func_name = arena_alloc(&g_arena_scratch, strlen(func_symbol->type_info.c_function.c_name) + 2);
             sprintf(c_func_name, "_%s", func_symbol->type_info.c_function.c_name);
             emit_code(codegen, "    bl    %s\n", c_func_name);
-            free(c_func_name);
         } else {
             emit_code(codegen, "    bl    _%s\n", op->data.string_value);
         }
@@ -764,10 +735,9 @@ void emit_function_call(CodeGen *codegen, ASTNode *op, ASTNode *expr, SymbolTabl
 
     // Call the function (macOS ABI: _ prefix for all symbols)
     if (func_symbol->type == SYM_C_FUNCTION) {
-        char *c_func_name = malloc(strlen(func_symbol->type_info.c_function.c_name) + 2);
+        char *c_func_name = arena_alloc(&g_arena_scratch, strlen(func_symbol->type_info.c_function.c_name) + 2);
         sprintf(c_func_name, "_%s", func_symbol->type_info.c_function.c_name);
         emit_code(codegen, "    bl    %s\n", c_func_name);
-        free(c_func_name);
     } else {
         emit_code(codegen, "    bl    _%s\n", op->data.string_value);
     }
@@ -821,9 +791,6 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                         emit_code(codegen, "%s:\n", true_label);
                         emit_mov_immediate(codegen, "x0", 1);
                         emit_code(codegen, "%s:\n", end_label);
-
-                        free(true_label);
-                        free(end_label);
                     }
                     // Handle logical AND: (&& a b) — short-circuit
                     else if (strcmp(op->data.string_value, "&&") == 0 && expr->data.list.count == 3) {
@@ -844,9 +811,6 @@ void generate_expression(CodeGen *codegen, ASTNode *expr, SymbolTable *symbols) 
                         emit_code(codegen, "%s:\n", false_label);
                         emit_mov_immediate(codegen, "x0", 0);
                         emit_code(codegen, "%s:\n", end_label);
-
-                        free(false_label);
-                        free(end_label);
                     }
                     // Handle logical not: (! expr)
                     else if (strcmp(op->data.string_value, "!") == 0 && expr->data.list.count == 2) {
@@ -1168,7 +1132,7 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                         if (fields_list->type == AST_LIST) {
                             // Create struct fields array
                             size_t field_count = fields_list->data.list.count;
-                            StructField *fields = calloc(field_count, sizeof(StructField));
+                            StructField *fields = arena_calloc(&g_arena_scratch, field_count, sizeof(StructField));
                             
                             for (size_t i = 0; i < field_count; i++) {
                                 ASTNode *field = fields_list->data.list.children[i];
@@ -1178,7 +1142,7 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                                     ASTNode *field_default = field->data.list.children[2];
                                     
                                     if (field_name->type == AST_IDENTIFIER && field_type->type == AST_IDENTIFIER) {
-                                        fields[i].name = strdup(field_name->data.string_value);
+                                        fields[i].name = arena_strdup(&g_arena_scratch, field_name->data.string_value);
                                         
                                         // Map type string to SymbolType
                                         const char *type_str = field_type->data.string_value;
@@ -1206,12 +1170,6 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
                             }
                             
                             add_struct_type(global_struct_types, name_node->data.string_value, fields, field_count);
-                            
-                            // Clean up temporary fields array (add_struct_type makes its own copy)
-                            for (size_t i = 0; i < field_count; i++) {
-                                if (fields[i].name) free(fields[i].name);
-                            }
-                            free(fields);
                         }
                     }
                     return; // Don't generate code for struct type definitions
@@ -1449,9 +1407,6 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
             }
             
             emit_code(codegen, "%s:\n", end_label);
-            
-            free(else_label);
-            free(end_label);
         }
     } else if (strcmp(op->data.string_value, "while") == 0) {
         // While loop: (while condition body)
@@ -1483,8 +1438,6 @@ void generate_statement(CodeGen *codegen, ASTNode *stmt, SymbolTable *symbols) {
 
             // Pop loop context
             codegen->loop_depth--;
-            free(loop_label);
-            free(end_label);
         }
     } else if (strcmp(op->data.string_value, "begin") == 0) {
         // Begin block: (begin stmt1 stmt2 ...)
@@ -1560,7 +1513,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
     emit_code(codegen, "    mov   x29, sp\n");
     
     // Create function-local symbol table
-    SymbolTable *func_symbols = malloc(sizeof(SymbolTable));
+    SymbolTable *func_symbols = arena_calloc(&g_arena_compile, 1, sizeof(SymbolTable));
     func_symbols->symbols = NULL;
     func_symbols->count = 0;
     func_symbols->capacity = 0;
@@ -1617,7 +1570,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                         
                         // Add struct symbol to function symbol table
                         Symbol symbol = {0};
-                        symbol.name = strdup(param_name);
+                        symbol.name = arena_strdup(&g_arena_compile, param_name);
                         symbol.type = SYM_STRUCT;
                         add_symbol(func_symbols, symbol);
                     } else if (param_type && (strstr(param_type, "[") != NULL || strcmp(param_type, "array") == 0)) {
@@ -1626,7 +1579,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                         
                         // Add array symbol to function symbol table
                         Symbol symbol = {0};
-                        symbol.name = strdup(param_name);
+                        symbol.name = arena_strdup(&g_arena_compile, param_name);
                         symbol.type = SYM_ARRAY;
                         add_symbol(func_symbols, symbol);
                     } else {
@@ -1635,7 +1588,7 @@ void generate_function_definition(CodeGen *codegen, const char *func_name, ASTNo
                         
                         // Add to function symbol table
                         Symbol symbol = {0};
-                        symbol.name = strdup(param_name);
+                        symbol.name = arena_strdup(&g_arena_compile, param_name);
                         symbol.type = SYM_INT; // Default to int
                         add_symbol(func_symbols, symbol);
                     }
@@ -1909,7 +1862,7 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *stru
         emit_code(codegen, "    .text\n");
     }
     
-    char *result = strdup(codegen->output);
+    char *result = arena_strdup(&g_arena_compile, codegen->output);
     free_codegen(codegen);
     
     return result;
@@ -1917,11 +1870,7 @@ char *compile_to_arm64(ASTNode *ast, SymbolTable *symbols, StructTypeTable *stru
 
 // Struct type table management functions
 StructTypeTable *create_struct_type_table() {
-    StructTypeTable *table = malloc(sizeof(StructTypeTable));
-    if (!table) {
-        fprintf(stderr, "Error: Failed to allocate memory for struct type table\n");
-        exit(1);
-    }
+    StructTypeTable *table = arena_calloc(&g_arena_compile, 1, sizeof(StructTypeTable));
     table->types = NULL;
     table->count = 0;
     table->capacity = 0;
@@ -1930,23 +1879,22 @@ StructTypeTable *create_struct_type_table() {
 
 void add_struct_type(StructTypeTable *table, const char *name, StructField *fields, size_t field_count) {
     if (table->count >= table->capacity) {
-        table->capacity = table->capacity == 0 ? 4 : table->capacity * 2;
-        table->types = realloc(table->types, table->capacity * sizeof(StructType));
-        if (!table->types) {
-            fprintf(stderr, "Error: Failed to reallocate memory for struct types\n");
-            exit(1);
-        }
+        size_t old_capacity = table->capacity;
+        table->capacity = old_capacity == 0 ? 4 : old_capacity * 2;
+        table->types = arena_grow(&g_arena_compile, table->types,
+                                  old_capacity * sizeof(StructType),
+                                  table->capacity * sizeof(StructType));
     }
-    
+
     StructType *type = &table->types[table->count];
-    type->name = strdup(name);
-    type->fields = malloc(field_count * sizeof(StructField));
+    type->name = arena_strdup(&g_arena_compile, name);
+    type->fields = arena_calloc(&g_arena_compile, field_count, sizeof(StructField));
     type->count = field_count;
     type->capacity = field_count;
     
     // Copy fields
     for (size_t i = 0; i < field_count; i++) {
-        type->fields[i].name = fields[i].name ? strdup(fields[i].name) : NULL;
+        type->fields[i].name = fields[i].name ? arena_strdup(&g_arena_compile, fields[i].name) : NULL;
         type->fields[i].type = fields[i].type;
         type->fields[i].default_value = fields[i].default_value; // Shallow copy for now
     }
@@ -1966,15 +1914,5 @@ StructType *find_struct_type(StructTypeTable *table, const char *name) {
 }
 
 void free_struct_type_table(StructTypeTable *table) {
-    if (!table) return;
-    
-    for (size_t i = 0; i < table->count; i++) {
-        free(table->types[i].name);
-        for (size_t j = 0; j < table->types[i].count; j++) {
-            free(table->types[i].fields[j].name);
-        }
-        free(table->types[i].fields);
-    }
-    free(table->types);
-    free(table);
+    (void)table;
 }

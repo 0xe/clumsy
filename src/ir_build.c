@@ -1,4 +1,5 @@
 #include "ir.h"
+#include "arena.h"
 #include "compiler.h"
 
 // IR Builder context
@@ -35,38 +36,37 @@ typedef struct {
 static char *ir_gen_temp(IRBuilder *b) {
     char buf[32];
     snprintf(buf, sizeof(buf), "t%d", b->temp_counter++);
-    return ir_strdup(buf);
+    return arena_strdup(&g_arena_scratch, buf);
 }
 
 static char *ir_gen_string_label(IRBuilder *b) {
     char buf[32];
     snprintf(buf, sizeof(buf), "str_%d", b->string_counter++);
-    return ir_strdup(buf);
+    return arena_strdup(&g_arena_scratch, buf);
 }
 
 static void ir_builder_init(IRBuilder *b, IRProgram *prog) {
     memset(b, 0, sizeof(IRBuilder));
     b->prog = prog;
     b->var_capacity = 256;
-    b->vars = calloc(b->var_capacity, sizeof(b->vars[0]));
+    b->vars = arena_calloc(&g_arena_compile, b->var_capacity, sizeof(b->vars[0]));
 }
 
 static void ir_builder_free(IRBuilder *b) {
-    for (int i = 0; i < b->num_vars; i++) {
-        free(b->vars[i].name);
-        free(b->vars[i].reg);
-    }
-    free(b->vars);
+    (void)b;
 }
 
 static void ir_add_var(IRBuilder *b, const char *name, const char *reg, bool is_global, Symbol *sym) {
     if (b->num_vars >= b->var_capacity) {
+        int old_capacity = b->var_capacity;
         b->var_capacity *= 2;
-        b->vars = realloc(b->vars, b->var_capacity * sizeof(b->vars[0]));
+        b->vars = arena_grow(&g_arena_compile, b->vars,
+                             (size_t)old_capacity * sizeof(b->vars[0]),
+                             (size_t)b->var_capacity * sizeof(b->vars[0]));
     }
     int i = b->num_vars++;
-    b->vars[i].name = ir_strdup(name);
-    b->vars[i].reg = ir_strdup(reg);
+    b->vars[i].name = ir_strdup(&g_arena_compile, name);
+    b->vars[i].reg = ir_strdup(&g_arena_compile, reg);
     b->vars[i].is_global = is_global;
     b->vars[i].symbol = sym;
 }
@@ -89,7 +89,6 @@ static void ir_emit(IRBuilder *b, IRInstr instr) {
 static IRBlock *ir_new_block_in_fn(IRBuilder *b, const char *prefix) {
     char *label = ir_gen_label(b->fn, prefix);
     IRBlock *blk = ir_add_block(b->fn, label);
-    free(label);
     return blk;
 }
 
@@ -115,9 +114,7 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
             ir_add_string(b->fn, label, expr->data.string_value);
             char *temp = ir_gen_temp(b);
             ir_emit(b, ir_instr(IR_ADDR, op_reg(temp), op_global(label), op_none(), op_none(), IR_TYPE_PTR));
-            free(label);
             IROperand result = op_reg(temp);
-            free(temp);
             return result;
         }
 
@@ -128,7 +125,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 char *temp = ir_gen_temp(b);
                 ir_emit(b, ir_instr(IR_LOAD, op_reg(temp), op_reg(var_reg), op_none(), op_none(), IR_TYPE_I64));
                 IROperand result = op_reg(temp);
-                free(temp);
                 return result;
             }
             // Not found - assume it's a global or external
@@ -142,7 +138,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                     char *addr_temp = ir_gen_temp(b);
                     ir_emit(b, ir_instr(IR_ADDR, op_reg(addr_temp), op_global(expr->data.string_value), op_none(), op_none(), IR_TYPE_PTR));
                     ir_emit(b, ir_instr(IR_LOAD, op_reg(temp), op_reg(addr_temp), op_none(), op_none(), IR_TYPE_I64));
-                    free(addr_temp);
                     found_global = true;
                     break;
                 }
@@ -156,7 +151,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
             }
 
             IROperand result = op_reg(temp);
-            free(temp);
             return result;
         }
 
@@ -195,7 +189,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 char *temp = ir_gen_temp(b);
                 ir_emit(b, ir_instr(opcode, op_reg(temp), left, right, op_none(), IR_TYPE_I64));
                 IROperand result = op_reg(temp);
-                free(temp);
                 return result;
             }
 
@@ -210,7 +203,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 args[2] = exp;
                 ir_emit(b, ir_instr(IR_CALL, op_reg(temp), args[0], args[1], args[2], IR_TYPE_I64));
                 IROperand result = op_reg(temp);
-                free(temp);
                 return result;
             }
 
@@ -273,8 +265,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 // Load value
                 char *temp = ir_gen_temp(b);
                 ir_emit(b, ir_instr(IR_LOAD, op_reg(temp), op_reg(ptr_temp), op_none(), op_none(), IR_TYPE_I64));
-                free(offset_temp);
-                free(ptr_temp);
                 return op_reg(temp);
             }
 
@@ -328,8 +318,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                     // Load value
                     char *temp = ir_gen_temp(b);
                     ir_emit(b, ir_instr(IR_LOAD, op_reg(temp), op_reg(ptr_temp), op_none(), op_none(), IR_TYPE_I64));
-                    free(struct_ptr);
-                    free(ptr_temp);
                     return op_reg(temp);
                 }
                 return op_none();
@@ -355,7 +343,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                         ir_emit(b, ir_instr(IR_ADD, op_reg(offset_temp), op_reg(alloc_temp), op_imm(fi * 8), op_none(), IR_TYPE_PTR));
 
                         ir_emit(b, ir_instr(IR_STORE, op_none(), val, op_reg(offset_temp), op_none(), IR_TYPE_VOID));
-                        free(offset_temp);
                     }
 
                     return op_reg(alloc_temp);
@@ -384,7 +371,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 char *temp = ir_gen_temp(b);
                 ir_emit(b, ir_instr(opcode, op_reg(temp), left, right, op_none(), IR_TYPE_I64));
                 IROperand result = op_reg(temp);
-                free(temp);
                 return result;
             }
 
@@ -485,7 +471,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 // not x = (x == 0) ? 1 : 0
                 ir_emit(b, ir_instr(IR_EQ, op_reg(temp), val, op_imm(0), op_none(), IR_TYPE_I64));
                 IROperand result = op_reg(temp);
-                free(temp);
                 return result;
             }
 
@@ -496,7 +481,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 char *temp = ir_gen_temp(b);
                 ir_emit(b, ir_instr(IR_NOT, op_reg(temp), val, op_none(), op_none(), IR_TYPE_I64));
                 IROperand result = op_reg(temp);
-                free(temp);
                 return result;
             }
 
@@ -506,7 +490,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                 char *temp = ir_gen_temp(b);
                 ir_emit(b, ir_instr(IR_NEG, op_reg(temp), val, op_none(), op_none(), IR_TYPE_I64));
                 IROperand result = op_reg(temp);
-                free(temp);
                 return result;
             }
 
@@ -542,7 +525,6 @@ static IROperand ir_build_expr(IRBuilder *b, ASTNode *expr, SymbolTable *symbols
                     char *temp = ir_gen_temp(b);
                     ir_emit(b, ir_call(op_reg(temp), args, num_args + 1, IR_TYPE_I64));
                     IROperand result = op_reg(temp);
-                    free(temp);
                     return result;
                 }
             }
@@ -633,7 +615,7 @@ static void ir_build_extern_decl(IRBuilder *b, ASTNode *stmt) {
             }
 
             int num_params = params_node->data.list.count;
-            IRType *param_types = calloc(num_params, sizeof(IRType));
+            IRType *param_types = arena_calloc(&g_arena_scratch, num_params, sizeof(IRType));
             for (int j = 0; j < num_params; j++) {
                 ASTNode *pt = params_node->data.list.children[j];
                 if (pt->type == AST_IDENTIFIER) {
@@ -654,7 +636,6 @@ static void ir_build_extern_decl(IRBuilder *b, ASTNode *stmt) {
             }
 
             ir_add_extern(b->prog, name, ret_type, param_types, num_params, is_variadic);
-            free(param_types);
             return;
         }
     }
@@ -715,18 +696,16 @@ static void ir_build_stmt(IRBuilder *b, ASTNode *stmt, SymbolTable *symbols) {
                             ASTNode *fields_container = struct_lit->data.list.children[1];
                             if (fields_container->type == AST_LIST) {
                                 int num_fields = fields_container->data.list.count;
-                                char **field_names = calloc(num_fields, sizeof(char *));
+                                char **field_names = arena_calloc(&g_arena_scratch, num_fields, sizeof(char *));
                                 for (int fi = 0; fi < num_fields; fi++) {
                                     ASTNode *field_decl = fields_container->data.list.children[fi];
                                     if (field_decl->type == AST_LIST && field_decl->data.list.count >= 2) {
-                                        field_names[fi] = ir_strdup(field_decl->data.list.children[0]->data.string_value);
+                                        field_names[fi] = arena_strdup(&g_arena_scratch, field_decl->data.list.children[0]->data.string_value);
                                     } else {
-                                        field_names[fi] = ir_strdup("_field");
+                                        field_names[fi] = arena_strdup(&g_arena_scratch, "_field");
                                     }
                                 }
                                 ir_add_struct_global(b->prog, name, field_names, num_fields, false);
-                                for (int fi = 0; fi < num_fields; fi++) free(field_names[fi]);
-                                free(field_names);
                             }
                         }
                         return;
@@ -783,8 +762,6 @@ static void ir_build_stmt(IRBuilder *b, ASTNode *stmt, SymbolTable *symbols) {
                                 char *ptr_temp = ir_gen_temp(b);
                                 ir_emit(b, ir_instr(IR_ADD, op_reg(ptr_temp), op_reg(ptr_reg), op_reg(offset_temp), op_none(), IR_TYPE_PTR));
                                 ir_emit(b, ir_instr(IR_STORE, op_none(), val, op_reg(ptr_temp), op_none(), IR_TYPE_VOID));
-                                free(offset_temp);
-                                free(ptr_temp);
                             }
                         } else {
                             IROperand val = ir_build_expr(b, init_value, symbols);
@@ -844,8 +821,6 @@ static void ir_build_stmt(IRBuilder *b, ASTNode *stmt, SymbolTable *symbols) {
                                 ir_emit(b, ir_instr(IR_ADD, op_reg(ptr_temp), base, op_reg(offset_temp), op_none(), IR_TYPE_PTR));
 
                                 ir_emit(b, ir_instr(IR_STORE, op_none(), val, op_reg(ptr_temp), op_none(), IR_TYPE_VOID));
-                                free(offset_temp);
-                                free(ptr_temp);
                             }
                         } else if (op_child->type == AST_IDENTIFIER && strcmp(op_child->data.string_value, ".") == 0) {
                             // Struct field set: (set . p x) → (set p.x val)
@@ -882,7 +857,6 @@ static void ir_build_stmt(IRBuilder *b, ASTNode *stmt, SymbolTable *symbols) {
                                 char *ptr_temp = ir_gen_temp(b);
                                 ir_emit(b, ir_instr(IR_ADD, op_reg(ptr_temp), base, op_imm(field_offset), op_none(), IR_TYPE_PTR));
                                 ir_emit(b, ir_instr(IR_STORE, op_none(), val, op_reg(ptr_temp), op_none(), IR_TYPE_VOID));
-                                free(ptr_temp);
                             }
                         }
                     }
@@ -1082,13 +1056,12 @@ static void ir_build_stmt(IRBuilder *b, ASTNode *stmt, SymbolTable *symbols) {
                             ir_add_global(b->prog, name, 0, true, init_value->data.string_value, 0, true);
                         } else if (init_value->type == AST_ARRAY) {
                             int arr_size = init_value->data.list.count;
-                            int64_t *vals = calloc(arr_size, sizeof(int64_t));
+                            int64_t *vals = arena_calloc(&g_arena_scratch, arr_size, sizeof(int64_t));
                             for (int ai = 0; ai < arr_size; ai++) {
                                 if (init_value->data.list.children[ai]->type == AST_INT)
                                     vals[ai] = init_value->data.list.children[ai]->data.int_value;
                             }
                             ir_add_global_array(b->prog, name, vals, arr_size, true);
-                            free(vals);
                         } else {
                             ir_add_global(b->prog, name, 0, false, NULL, 0, true);
                         }
@@ -1155,18 +1128,16 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
                                     ASTNode *fields_container = struct_lit->data.list.children[1];
                                     if (fields_container->type == AST_LIST) {
                                         int num_fields = fields_container->data.list.count;
-                                        char **field_names = calloc(num_fields, sizeof(char *));
+                                        char **field_names = arena_calloc(&g_arena_scratch, num_fields, sizeof(char *));
                                         for (int fi = 0; fi < num_fields; fi++) {
                                             ASTNode *field_decl = fields_container->data.list.children[fi];
                                             if (field_decl->type == AST_LIST && field_decl->data.list.count >= 2) {
-                                                field_names[fi] = ir_strdup(field_decl->data.list.children[0]->data.string_value);
+                                                field_names[fi] = arena_strdup(&g_arena_scratch, field_decl->data.list.children[0]->data.string_value);
                                             } else {
-                                                field_names[fi] = ir_strdup("_field");
+                                                field_names[fi] = arena_strdup(&g_arena_scratch, "_field");
                                             }
                                         }
                                         ir_add_struct_global(b->prog, name, field_names, num_fields, is_pub);
-                                        for (int fi = 0; fi < num_fields; fi++) free(field_names[fi]);
-                                        free(field_names);
                                         continue;
                                     }
                                 }
@@ -1188,11 +1159,11 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
 
                             // Set up parameters
                             fn->num_params = init_value->data.fn.param_count;
-                            fn->params = calloc(fn->num_params, sizeof(char *));
-                            fn->param_types = calloc(fn->num_params, sizeof(IRType));
+                            fn->params = arena_calloc(&g_arena_compile, fn->num_params, sizeof(char *));
+                            fn->param_types = arena_calloc(&g_arena_compile, fn->num_params, sizeof(IRType));
                             for (int j = 0; j < fn->num_params; j++) {
                                 ASTNode *param = init_value->data.fn.params[j];
-                                fn->params[j] = ir_strdup(param->data.list.children[0]->data.string_value);
+                                fn->params[j] = ir_strdup(&g_arena_compile, param->data.list.children[0]->data.string_value);
                                 ASTNode *pt = param->data.list.children[1];
                                 if (pt->type == AST_IDENTIFIER) {
                                     if (strcmp(pt->data.string_value, "void") == 0) fn->param_types[j] = IR_TYPE_VOID;
@@ -1225,8 +1196,7 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
                             for (int j = 0; j < fn->num_params; j++) {
                                 char qbe_name[16];
                                 snprintf(qbe_name, sizeof(qbe_name), "p%d", j);
-                                free(fn->params[j]);
-                                fn->params[j] = ir_strdup(qbe_name);
+                                fn->params[j] = ir_strdup(&g_arena_compile, qbe_name);
 
                                 char *ptr_reg = ir_gen_temp(b);
                                 ir_emit(b, ir_instr(IR_ALLOC, op_reg(ptr_reg), op_imm(16), op_none(), op_none(), IR_TYPE_PTR));
@@ -1308,13 +1278,12 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
                                             if (declared_size > arr_size) arr_size = declared_size;
                                         }
                                     }
-                                    int64_t *vals = calloc(arr_size, sizeof(int64_t));
+                                    int64_t *vals = arena_calloc(&g_arena_scratch, arr_size, sizeof(int64_t));
                                     for (int ai = 0; ai < init_count; ai++) {
                                         if (init_value->data.list.children[ai]->type == AST_INT)
                                             vals[ai] = init_value->data.list.children[ai]->data.int_value;
                                     }
                                     ir_add_global_array(b->prog, name, vals, arr_size, true);
-                                    free(vals);
                                 } else {
                                     ir_add_global(b->prog, name, 0, false, NULL, 0, true);
                                 }
@@ -1342,13 +1311,12 @@ static void ir_build_top_level(IRBuilder *b, ASTNode *ast, SymbolTable *symbols)
                                         if (declared_size > arr_size) arr_size = declared_size;
                                     }
                                 }
-                                int64_t *vals = calloc(arr_size, sizeof(int64_t));
+                                int64_t *vals = arena_calloc(&g_arena_scratch, arr_size, sizeof(int64_t));
                                 for (int ai = 0; ai < init_count; ai++) {
                                     if (init_value->data.list.children[ai]->type == AST_INT)
                                         vals[ai] = init_value->data.list.children[ai]->data.int_value;
                                 }
                                 ir_add_global_array(b->prog, name, vals, arr_size, false);
-                                free(vals);
                             } else {
                                 ir_add_global(b->prog, name, 0, false, NULL, 0, false);
                             }
@@ -1390,10 +1358,10 @@ static void ir_generate_pow_function(IRBuilder *b, IRProgram *prog) {
     IRFunction *fn = ir_add_function(prog, "__clumsy_pow", IR_TYPE_I64);
     fn->is_public = false;
     fn->num_params = 2;
-    fn->params = calloc(2, sizeof(char *));
-    fn->param_types = calloc(2, sizeof(IRType));
-    fn->params[0] = ir_strdup("p0");
-    fn->params[1] = ir_strdup("p1");
+    fn->params = arena_calloc(&g_arena_compile, 2, sizeof(char *));
+    fn->param_types = arena_calloc(&g_arena_compile, 2, sizeof(IRType));
+    fn->params[0] = ir_strdup(&g_arena_compile, "p0");
+    fn->params[1] = ir_strdup(&g_arena_compile, "p1");
     fn->param_types[0] = IR_TYPE_I64;
     fn->param_types[1] = IR_TYPE_I64;
 
@@ -1499,6 +1467,7 @@ static void ir_generate_pow_function(IRBuilder *b, IRProgram *prog) {
 // --- Public API ---
 
 IRProgram *ir_build(ASTNode *ast, SymbolTable *symbols) {
+    arena_reset(&g_arena_scratch);
     IRProgram *prog = ir_new_program();
     IRBuilder builder;
     ir_builder_init(&builder, prog);

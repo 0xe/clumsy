@@ -1,4 +1,5 @@
 #include "ir.h"
+#include "arena.h"
 #include <ctype.h>
 
 // CLIF text emitter: post-SSA IR -> cranelift IR text (CLIF)
@@ -68,6 +69,7 @@ typedef struct {
     int temp_counter;      // next v-number for materialized temps
     int num_vregs;         // max vreg number + 1
     int *alias;            // union-find over vreg numbers (MOV/ADDR aliases)
+    int alias_cap;
 
     // Per-function blocks, in emission (dominator-DFS) order
     IRBlock **block_order;
@@ -107,12 +109,11 @@ static int vreg_number(const char *name) {
 
 static char *clif_sanitize(const char *name) {
     int len = (int)strlen(name);
-    char *s = malloc(len + 1);
+    char *s = arena_strdup(&g_arena_scratch, name);
     for (int i = 0; i < len; i++) {
-        char c = name[i];
-        s[i] = (isalnum((unsigned char)c) || c == '_') ? c : '_';
+        unsigned char c = (unsigned char)s[i];
+        if (!isalnum(c) && c != '_') s[i] = '_';
     }
-    s[len] = '\0';
     return s;
 }
 
@@ -164,10 +165,13 @@ static int func_id_for(ClifEmitter *e, const char *name) {
         if (strcmp(e->implicit[i], name) == 0) return e->prog->num_externs + i;
     }
     if (e->num_implicit >= e->implicit_cap) {
+        int old_cap = e->implicit_cap;
         e->implicit_cap *= 2;
-        e->implicit = realloc(e->implicit, e->implicit_cap * sizeof(char *));
+        e->implicit = arena_grow(&g_arena_scratch, e->implicit,
+                                 (size_t)old_cap * sizeof(char *),
+                                 (size_t)e->implicit_cap * sizeof(char *));
     }
-    e->implicit[e->num_implicit] = ir_strdup(name);
+    e->implicit[e->num_implicit] = ir_strdup(&g_arena_scratch, name);
     return e->prog->num_externs + e->num_implicit++;
 }
 
@@ -191,10 +195,13 @@ static void mark_variadic(ClifEmitter *e, const char *name) {
         if (strcmp(e->variadic[i], name) == 0) return;
     }
     if (e->num_variadic >= e->variadic_cap) {
+        int old_cap = e->variadic_cap;
         e->variadic_cap *= 2;
-        e->variadic = realloc(e->variadic, e->variadic_cap * sizeof(char *));
+        e->variadic = arena_grow(&g_arena_scratch, e->variadic,
+                                 (size_t)old_cap * sizeof(char *),
+                                 (size_t)e->variadic_cap * sizeof(char *));
     }
-    e->variadic[e->num_variadic] = ir_strdup(name);
+    e->variadic[e->num_variadic] = ir_strdup(&g_arena_scratch, name);
     e->num_variadic++;
 }
 
@@ -213,13 +220,16 @@ static void data_add(DataList *dl, const char *name, int global_idx, const char 
         if (strcmp(dl->items[i].name, name) == 0) return;
     }
     if (dl->num >= dl->cap) {
+        int old_cap = dl->cap;
         dl->cap *= 2;
-        dl->items = realloc(dl->items, dl->cap * sizeof(DataRef));
+        dl->items = arena_grow(&g_arena_scratch, dl->items,
+                               (size_t)old_cap * sizeof(DataRef),
+                               (size_t)dl->cap * sizeof(DataRef));
     }
-    dl->items[dl->num].name = ir_strdup(name);
+    dl->items[dl->num].name = ir_strdup(&g_arena_scratch, name);
     dl->items[dl->num].id = dl->num;
     dl->items[dl->num].global_idx = global_idx;
-    dl->items[dl->num].str_val = str_val ? ir_strdup(str_val) : NULL;
+    dl->items[dl->num].str_val = str_val ? ir_strdup(&g_arena_scratch, str_val) : NULL;
     dl->num++;
 }
 
@@ -386,10 +396,13 @@ static void scan_operand_refs(ClifEmitter *e, IROperand *op, bool force_func) {
                 if (strcmp(e->fn_refs[i].name, op->global) == 0) return;
             }
             if (e->num_fn_refs >= e->fn_refs_cap) {
+                int old_cap = e->fn_refs_cap;
                 e->fn_refs_cap *= 2;
-                e->fn_refs = realloc(e->fn_refs, e->fn_refs_cap * sizeof(e->fn_refs[0]));
+                e->fn_refs = arena_grow(&g_arena_scratch, e->fn_refs,
+                                        (size_t)old_cap * sizeof(e->fn_refs[0]),
+                                        (size_t)e->fn_refs_cap * sizeof(e->fn_refs[0]));
             }
-            e->fn_refs[e->num_fn_refs].name = ir_strdup(op->global);
+            e->fn_refs[e->num_fn_refs].name = ir_strdup(&g_arena_scratch, op->global);
             e->fn_refs[e->num_fn_refs].fn_idx = e->next_fn++;
             e->num_fn_refs++;
             (void)id;
@@ -398,10 +411,13 @@ static void scan_operand_refs(ClifEmitter *e, IROperand *op, bool force_func) {
                 if (strcmp(e->gv_refs[i].name, op->global) == 0) return;
             }
             if (e->num_gv_refs >= e->gv_refs_cap) {
+                int old_cap = e->gv_refs_cap;
                 e->gv_refs_cap *= 2;
-                e->gv_refs = realloc(e->gv_refs, e->gv_refs_cap * sizeof(e->gv_refs[0]));
+                e->gv_refs = arena_grow(&g_arena_scratch, e->gv_refs,
+                                        (size_t)old_cap * sizeof(e->gv_refs[0]),
+                                        (size_t)e->gv_refs_cap * sizeof(e->gv_refs[0]));
             }
-            e->gv_refs[e->num_gv_refs].name = ir_strdup(op->global);
+            e->gv_refs[e->num_gv_refs].name = ir_strdup(&g_arena_scratch, op->global);
             e->gv_refs[e->num_gv_refs].gv_idx = e->next_gv++;
             e->num_gv_refs++;
         }
@@ -457,9 +473,14 @@ static void pre_scan_function(ClifEmitter *e, IRFunction *fn) {
                     size = ((size + 15) / 16) * 16;
                 }
                 if (e->num_slots >= e->slot_cap) {
+                    int old_cap = e->slot_cap;
                     e->slot_cap *= 2;
-                    e->slot_sizes = realloc(e->slot_sizes, e->slot_cap * sizeof(int));
-                    e->alloc_vregs = realloc(e->alloc_vregs, e->slot_cap * sizeof(int));
+                    e->slot_sizes = arena_grow(&g_arena_scratch, e->slot_sizes,
+                                               (size_t)old_cap * sizeof(int),
+                                               (size_t)e->slot_cap * sizeof(int));
+                    e->alloc_vregs = arena_grow(&g_arena_scratch, e->alloc_vregs,
+                                                (size_t)old_cap * sizeof(int),
+                                                (size_t)e->slot_cap * sizeof(int));
                 }
                 e->slot_sizes[e->num_slots] = size;
                 e->alloc_vregs[e->num_slots] = vreg_number(in->dest.reg);
@@ -473,7 +494,12 @@ static void pre_scan_function(ClifEmitter *e, IRFunction *fn) {
 
     // Alias table for MOV/ADDR register copies
     if (e->num_vregs > 0) {
-        e->alias = realloc(e->alias, e->num_vregs * sizeof(int));
+        if (e->num_vregs > e->alias_cap) {
+            e->alias = arena_grow(&g_arena_scratch, e->alias,
+                                  (size_t)e->alias_cap * sizeof(int),
+                                  (size_t)e->num_vregs * sizeof(int));
+            e->alias_cap = e->num_vregs;
+        }
         for (int i = 0; i < e->num_vregs; i++) e->alias[i] = i;
     }
 }
@@ -897,7 +923,6 @@ static void emit_extern_decl(FILE *out, const char *name, IRType ret, int nparam
     fprintf(out, ")");
     if (ret != IR_TYPE_VOID) fprintf(out, " -> i64");
     fprintf(out, " {}\n");
-    free(n);
 }
 
 static void emit_cranelift_function(ClifEmitter *e, IRFunction *fn) {
@@ -911,7 +936,6 @@ static void emit_cranelift_function(ClifEmitter *e, IRFunction *fn) {
     fprintf(out, ")");
     if (fn->return_type != IR_TYPE_VOID) fprintf(out, " -> i64");
     fprintf(out, " {\n");
-    free(fname);
 
     // Preamble: data and function references, then explicit stack slots
     for (int i = 0; i < e->num_gv_refs; i++) {
@@ -1007,7 +1031,7 @@ static void emit_data_section(ClifEmitter *e, DataList *dl) {
             else cap = 8;
         }
         if (cap < 8) cap = 8;
-        unsigned char *bytes = calloc(cap, 1);
+        unsigned char *bytes = arena_calloc(&g_arena_scratch, cap, 1);
         int byte_len = 0;
 
         if (d->str_val) {
@@ -1043,8 +1067,6 @@ static void emit_data_section(ClifEmitter *e, DataList *dl) {
                         int asize = e->prog->globals[gi].array_size * 8;
                         if (asize < 8) asize = 8;
                         fprintf(out, "extern %s r %d\n", n, asize);
-                        free(n);
-                        free(bytes);
                         continue;
                     }
                 } else {
@@ -1092,14 +1114,14 @@ static void emit_data_section(ClifEmitter *e, DataList *dl) {
             }
         }
         fprintf(out, "\n");
-        free(n);
-        free(bytes);
     }
 }
 
 // --- top level ---
 
 void emit_cranelift(IRProgram *prog, FILE *out) {
+    arena_reset(&g_arena_scratch);
+
     ClifEmitter e = {0};
     e.out = out;
     e.prog = prog;
@@ -1108,32 +1130,32 @@ void emit_cranelift(IRProgram *prog, FILE *out) {
     e.num_functions = prog->num_functions;
     e.num_externs = prog->num_externs;
     e.implicit_cap = 16;
-    e.implicit = calloc(e.implicit_cap, sizeof(char *));
+    e.implicit = arena_calloc(&g_arena_scratch, e.implicit_cap, sizeof(char *));
     e.variadic_cap = 16;
-    e.variadic = calloc(e.variadic_cap, sizeof(char *));
+    e.variadic = arena_calloc(&g_arena_scratch, e.variadic_cap, sizeof(char *));
 
     int max_blocks = 0;
     for (int f = 0; f < prog->num_functions; f++) {
         if (prog->functions[f]->num_blocks > max_blocks)
             max_blocks = prog->functions[f]->num_blocks;
     }
-    e.block_order = calloc(max_blocks ? max_blocks : 1, sizeof(IRBlock *));
-    e.block_num = calloc(max_blocks ? max_blocks : 1, sizeof(int));
+    e.block_order = arena_calloc(&g_arena_scratch, max_blocks ? max_blocks : 1, sizeof(IRBlock *));
+    e.block_num = arena_calloc(&g_arena_scratch, max_blocks ? max_blocks : 1, sizeof(int));
     e.slot_cap = 64;
-    e.slot_sizes = calloc(e.slot_cap, sizeof(int));
-    e.alloc_vregs = calloc(e.slot_cap, sizeof(int));
+    e.slot_sizes = arena_calloc(&g_arena_scratch, e.slot_cap, sizeof(int));
+    e.alloc_vregs = arena_calloc(&g_arena_scratch, e.slot_cap, sizeof(int));
     e.alias = NULL;
     e.num_vregs = 0;
 
     e.gv_refs_cap = 64;
-    e.gv_refs = calloc(e.gv_refs_cap, sizeof(e.gv_refs[0]));
+    e.gv_refs = arena_calloc(&g_arena_scratch, e.gv_refs_cap, sizeof(e.gv_refs[0]));
     e.fn_refs_cap = 64;
-    e.fn_refs = calloc(e.fn_refs_cap, sizeof(e.fn_refs[0]));
+    e.fn_refs = arena_calloc(&g_arena_scratch, e.fn_refs_cap, sizeof(e.fn_refs[0]));
 
     // Pass 1: discover all data references and implicit externs
     DataList dl = {0};
     dl.cap = 64;
-    dl.items = calloc(dl.cap, sizeof(DataRef));
+    dl.items = arena_calloc(&g_arena_scratch, dl.cap, sizeof(DataRef));
     pre_scan_refs(&e, &dl);
     e.dl = &dl;
 
@@ -1166,20 +1188,4 @@ void emit_cranelift(IRProgram *prog, FILE *out) {
     // Pass 4: data
     emit_data_section(&e, &dl);
 
-    // Cleanup
-    for (int i = 0; i < dl.num; i++) {
-        free(dl.items[i].name);
-        free(dl.items[i].str_val);
-    }
-    free(dl.items);
-    for (int i = 0; i < e.num_implicit; i++) free(e.implicit[i]);
-    free(e.implicit);
-    for (int i = 0; i < e.num_gv_refs; i++) free(e.gv_refs[i].name);
-    for (int i = 0; i < e.num_fn_refs; i++) free(e.fn_refs[i].name);
-    free(e.gv_refs);
-    free(e.fn_refs);
-    free(e.block_order);
-    free(e.block_num);
-    free(e.slot_sizes);
-    free(e.alias);
 }
