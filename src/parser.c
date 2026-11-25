@@ -1,11 +1,8 @@
 #include "parser.h"
+#include "arena.h"
 
 ASTNode *create_ast_node(ASTNodeType type) {
-    ASTNode *node = malloc(sizeof(ASTNode));
-    if (!node) {
-        fprintf(stderr, "Error: Failed to allocate memory for AST node\n");
-        exit(1);
-    }
+    ASTNode *node = arena_calloc(&g_arena_compile, 1, sizeof(ASTNode));
     node->type = type;
     node->scope = NULL;
     
@@ -26,13 +23,12 @@ void add_ast_child(ASTNode *parent, ASTNode *child) {
     }
     
     if (parent->data.list.count >= parent->data.list.capacity) {
-        parent->data.list.capacity = parent->data.list.capacity == 0 ? 4 : parent->data.list.capacity * 2;
-        parent->data.list.children = realloc(parent->data.list.children, 
-                                            parent->data.list.capacity * sizeof(ASTNode*));
-        if (!parent->data.list.children) {
-            fprintf(stderr, "Error: Failed to allocate memory for AST children\n");
-            exit(1);
-        }
+        size_t old_capacity = parent->data.list.capacity;
+        parent->data.list.capacity = old_capacity == 0 ? 4 : old_capacity * 2;
+        parent->data.list.children = arena_grow(&g_arena_compile,
+                                                parent->data.list.children,
+                                                old_capacity * sizeof(ASTNode *),
+                                                parent->data.list.capacity * sizeof(ASTNode *));
     }
     
     parent->data.list.children[parent->data.list.count++] = child;
@@ -104,7 +100,7 @@ ASTNode *parse_sexp(Parser *parser) {
         // Parse function name
         if (match_token(parser, TOKEN_IDENTIFIER)) {
             ASTNode *name_node = create_ast_node(AST_IDENTIFIER);
-            name_node->data.string_value = strdup(current_token(parser)->value);
+            name_node->data.string_value = arena_strdup(&g_arena_compile, current_token(parser)->value);
             add_ast_child(extern_node, name_node);
             next_token(parser);
         }
@@ -164,8 +160,12 @@ ASTNode *parse_sexp(Parser *parser) {
             if (match_token(parser, TOKEN_LPAREN)) {
                 ASTNode *param = parse_sexp(parser);
                 if (fn_node->data.fn.param_count >= param_cap) {
+                    size_t old_cap = param_cap;
                     param_cap = param_cap ? param_cap * 2 : 4;
-                    fn_node->data.fn.params = realloc(fn_node->data.fn.params, param_cap * sizeof(ASTNode *));
+                    fn_node->data.fn.params = arena_grow(&g_arena_compile,
+                                                         fn_node->data.fn.params,
+                                                         old_cap * sizeof(ASTNode *),
+                                                         param_cap * sizeof(ASTNode *));
                 }
                 fn_node->data.fn.params[fn_node->data.fn.param_count++] = param;
             } else {
@@ -189,8 +189,11 @@ ASTNode *parse_sexp(Parser *parser) {
             ASTNode *expr = parse_exp(parser);
             if (expr) {
                 if (extra_count >= extra_cap) {
+                    size_t old_cap = extra_cap;
                     extra_cap = extra_cap ? extra_cap * 2 : 4;
-                    extras = realloc(extras, extra_cap * sizeof(ASTNode *));
+                    extras = arena_grow(&g_arena_compile, extras,
+                                        old_cap * sizeof(ASTNode *),
+                                        extra_cap * sizeof(ASTNode *));
                 }
                 extras[extra_count++] = expr;
             }
@@ -206,7 +209,7 @@ ASTNode *parse_sexp(Parser *parser) {
                 // Multiple body expressions — wrap in a begin block
                 ASTNode *begin = create_ast_node(AST_LIST);
                 ASTNode *begin_op = create_ast_node(AST_IDENTIFIER);
-                begin_op->data.string_value = strdup("begin");
+                begin_op->data.string_value = arena_strdup(&g_arena_compile, "begin");
                 add_ast_child(begin, begin_op);
                 for (size_t i = 1; i < extra_count; i++) {
                     add_ast_child(begin, extras[i]);
@@ -214,8 +217,7 @@ ASTNode *parse_sexp(Parser *parser) {
                 fn_node->data.fn.body = begin;
             }
         }
-        free(extras);
-        
+
         if (match_token(parser, TOKEN_RPAREN)) {
             next_token(parser); // consume ')'
         }
@@ -270,7 +272,7 @@ ASTNode *parse_exp(Parser *parser) {
         
         case TOKEN_STRING: {
             ASTNode *node = create_ast_node(AST_STRING);
-            node->data.string_value = strdup(token->value);
+            node->data.string_value = arena_strdup(&g_arena_compile, token->value);
             next_token(parser);
             return node;
         }
@@ -299,7 +301,7 @@ ASTNode *parse_exp(Parser *parser) {
                 
                 // mark struct literals
                 ASTNode *struct_op = create_ast_node(AST_IDENTIFIER);
-                struct_op->data.string_value = strdup("#");
+                struct_op->data.string_value = arena_strdup(&g_arena_compile, "#");
                 add_ast_child(struct_literal, struct_op);
                 
                 // struct fields
@@ -311,7 +313,7 @@ ASTNode *parse_exp(Parser *parser) {
                 return struct_literal;
             }
             ASTNode *node = create_ast_node(AST_IDENTIFIER);
-            node->data.string_value = strdup(token->value);
+            node->data.string_value = arena_strdup(&g_arena_compile, token->value);
             next_token(parser);
             
             // array indexing: identifier[expression]
@@ -322,7 +324,7 @@ ASTNode *parse_exp(Parser *parser) {
                 
                 // array access operator
                 ASTNode *access_op = create_ast_node(AST_IDENTIFIER);
-                access_op->data.string_value = strdup("[]");
+                access_op->data.string_value = arena_strdup(&g_arena_compile, "[]");
                 add_ast_child(index_expr, access_op);
                 
                 // array variable
@@ -350,7 +352,7 @@ ASTNode *parse_exp(Parser *parser) {
                     
                     // field access operator
                     ASTNode *access_op = create_ast_node(AST_IDENTIFIER);
-                    access_op->data.string_value = strdup(".");
+                    access_op->data.string_value = arena_strdup(&g_arena_compile, ".");
                     add_ast_child(field_access, access_op);
                     
                     // struct variable
@@ -358,7 +360,7 @@ ASTNode *parse_exp(Parser *parser) {
                     
                     // field name
                     ASTNode *field = create_ast_node(AST_IDENTIFIER);
-                    field->data.string_value = strdup(current_token(parser)->value);
+                    field->data.string_value = arena_strdup(&g_arena_compile, current_token(parser)->value);
                     add_ast_child(field_access, field);
                     next_token(parser);
                     
@@ -374,7 +376,7 @@ ASTNode *parse_exp(Parser *parser) {
                 
                 // array type operator
                 ASTNode *type_op = create_ast_node(AST_IDENTIFIER);
-                type_op->data.string_value = strdup("array_type");
+                type_op->data.string_value = arena_strdup(&g_arena_compile, "array_type");
                 add_ast_child(array_type, type_op);
                 
                 // base type
@@ -402,7 +404,7 @@ ASTNode *parse_exp(Parser *parser) {
             ASTNode *quote_list = create_ast_node(AST_LIST);
             
             ASTNode *quote_symbol = create_ast_node(AST_IDENTIFIER);
-            quote_symbol->data.string_value = strdup("quote");
+            quote_symbol->data.string_value = arena_strdup(&g_arena_compile, "quote");
             add_ast_child(quote_list, quote_symbol);
             
             ASTNode *quoted_expr = parse_exp(parser);
@@ -438,42 +440,7 @@ ASTNode *parse(TokenArray *tokens) {
 }
 
 void free_ast(ASTNode *node) {
-    if (!node) return;
-    
-    switch (node->type) {
-        case AST_STRING:
-        case AST_IDENTIFIER:
-            free(node->data.string_value);
-            break;
-            
-        case AST_LIST:
-        case AST_ARRAY:
-        case AST_EXTERN_DECL:
-
-            for (size_t i = 0; i < node->data.list.count; i++) {
-                free_ast(node->data.list.children[i]);
-            }
-            free(node->data.list.children);
-            break;
-
-        case AST_FN:
-            for (size_t i = 0; i < node->data.fn.param_count; i++) {
-                free_ast(node->data.fn.params[i]);
-            }
-            free(node->data.fn.params);
-            free_ast(node->data.fn.return_type);
-            free_ast(node->data.fn.body);
-            break;
-
-        case AST_INT:
-        case AST_CHAR:
-        case AST_ADDRESS_OF:
-        case AST_DEREFERENCE:
-            // No dynamic memory to free
-            break;
-    }
-    
-    free(node);
+    (void)node;
 }
 
 void print_symbol_table(SymbolTable *symbols) {

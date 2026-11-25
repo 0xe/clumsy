@@ -12,6 +12,7 @@ endif()
 # --- Compiler ---
 set(COMPILER_SOURCES
     src/main.c
+    src/arena.c
     src/tokenizer.c
     src/parser.c
     src/compiler.c
@@ -25,6 +26,7 @@ set(COMPILER_SOURCES
 )
 
 set(COMPILER_HEADERS
+    src/arena.h
     src/types.h
     src/tokenizer.h
     src/parser.h
@@ -40,6 +42,10 @@ set_target_properties(clumsyc PROPERTIES
 
 # --- Tests ---
 enable_testing()
+
+add_executable(arena_test tests/arena_test.c src/arena.c)
+target_include_directories(arena_test PRIVATE src)
+add_test(NAME arena_test COMMAND arena_test)
 
 if(NOT DEFINED TEST_BACKEND)
     set(TEST_BACKEND "qbe")

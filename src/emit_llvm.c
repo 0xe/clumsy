@@ -1,4 +1,5 @@
 #include "ir.h"
+#include "arena.h"
 #include <ctype.h>
 
 // LLVM IR emitter: IR → LLVM IR text
@@ -26,16 +27,11 @@ typedef struct {
 // Sanitize a name for LLVM: replace chars outside [a-zA-Z0-9_$.-] with '_'
 static char *llvm_sanitize(const char *name) {
     int len = strlen(name);
-    char *result = malloc(len + 1);
+    char *result = arena_strdup(&g_arena_scratch, name);
     for (int i = 0; i < len; i++) {
-        char c = name[i];
-        if (isalnum(c) || c == '_' || c == '$' || c == '.' || c == '-') {
-            result[i] = c;
-        } else {
-            result[i] = '_';
-        }
+        char c = result[i];
+        if (!isalnum(c) && c != '_' && c != '$' && c != '.' && c != '-') result[i] = '_';
     }
-    result[len] = '\0';
     return result;
 }
 
@@ -57,13 +53,11 @@ static void emit_operand(IROperand *op, FILE *out) {
         case OP_BLOCK: {
             char *s = llvm_sanitize(op->block);
             fprintf(out, "%%%s", s);
-            free(s);
             break;
         }
         case OP_GLOBAL: {
             char *s = llvm_sanitize(op->global);
             fprintf(out, "@%s", s);
-            free(s);
             break;
         }
     }
@@ -469,7 +463,6 @@ static void emit_llvm_string_global(const char *name, const char *value,
     fprintf(out, "@%s = %sconstant [%d x i8] ", n, linkage, decoded_string_byte_len(value));
     emit_llvm_string_bytes(value, out);
     fprintf(out, "\n");
-    free(n);
 }
 
 static void emit_llvm_function(LLVMEmitter *e, IRFunction *fn, IRProgram *prog) {
@@ -480,7 +473,6 @@ static void emit_llvm_function(LLVMEmitter *e, IRFunction *fn, IRProgram *prog) 
     {
         char *n = llvm_sanitize(fn->name);
         fprintf(out, "%s", n);
-        free(n);
     }
     fprintf(out, "(");
     for (int i = 0; i < fn->num_params; i++) {
@@ -493,7 +485,6 @@ static void emit_llvm_function(LLVMEmitter *e, IRFunction *fn, IRProgram *prog) 
         IRBlock *b = fn->blocks[i];
         char *n = llvm_sanitize(b->label);
         fprintf(out, "%s:\n", n);
-        free(n);
         for (int j = 0; j < b->num_instrs; j++) {
             emit_llvm_instr(e, &b->instrs[j], prog);
             fprintf(out, "\n");
@@ -503,6 +494,8 @@ static void emit_llvm_function(LLVMEmitter *e, IRFunction *fn, IRProgram *prog) 
 }
 
 void emit_llvm(IRProgram *prog, FILE *out) {
+    arena_reset(&g_arena_scratch);
+
     // Extern function declarations. All values are i64 in the IR model, so
     // externs are declared all-i64 regardless of their C signature (ARM64
     // passes i64/ptr identically in x-registers). Variadic externs are never
@@ -567,10 +560,7 @@ void emit_llvm(IRProgram *prog, FILE *out) {
                     break;
                 }
             }
-            if (defined_here) {
-                free(gname);
-                continue;
-            }
+            if (defined_here) continue;
             fprintf(out, "@%s = external global i64\n", gname);
         } else if (prog->globals[i].is_string) {
             const char *linkage = prog->globals[i].is_public ? "" : "internal ";
@@ -592,7 +582,6 @@ void emit_llvm(IRProgram *prog, FILE *out) {
             fprintf(out, "@%s = %sglobal i64 %ld\n", gname, linkage,
                     (long)prog->globals[i].value);
         }
-        free(gname);
     }
     if (prog->num_globals > 0) fprintf(out, "\n");
 

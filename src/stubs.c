@@ -1,4 +1,5 @@
 #include "ir.h"
+#include "arena.h"
 
 // Variadic-call stubs for the QBE and LLVM backends (Apple AArch64).
 //
@@ -38,6 +39,8 @@ static void emit_stub(FILE *out, const char *name) {
 }
 
 void emit_variadic_stubs(IRProgram *prog, FILE *out) {
+    arena_reset(&g_arena_scratch);
+
     // Collect the distinct variadic externs the program actually calls (every
     // extern with a variadic call site, plus printf which is always libc-variadic).
     char **stubs = NULL;
@@ -51,10 +54,13 @@ void emit_variadic_stubs(IRProgram *prog, FILE *out) {
         if (!ir_extern_is_variadic(prog, name)) continue;
         if (!ir_program_calls(prog, name)) continue;
         if (num_stubs >= cap) {
+            int old_cap = cap;
             cap = cap ? cap * 2 : 8;
-            stubs = realloc(stubs, cap * sizeof(char *));
+            stubs = arena_grow(&g_arena_scratch, stubs,
+                               (size_t)old_cap * sizeof(char *),
+                               (size_t)cap * sizeof(char *));
         }
-        stubs[num_stubs] = ir_strdup(name);
+        stubs[num_stubs] = ir_strdup(&g_arena_scratch, name);
         num_stubs++;
     }
 
@@ -66,17 +72,18 @@ void emit_variadic_stubs(IRProgram *prog, FILE *out) {
         }
         if (!seen) {
             if (num_stubs >= cap) {
+                int old_cap = cap;
                 cap = cap ? cap * 2 : 8;
-                stubs = realloc(stubs, cap * sizeof(char *));
+                stubs = arena_grow(&g_arena_scratch, stubs,
+                                   (size_t)old_cap * sizeof(char *),
+                                   (size_t)cap * sizeof(char *));
             }
-            stubs[num_stubs] = ir_strdup("printf");
+            stubs[num_stubs] = ir_strdup(&g_arena_scratch, "printf");
             num_stubs++;
         }
     }
 
     for (int i = 0; i < num_stubs; i++) {
         emit_stub(out, stubs[i]);
-        free(stubs[i]);
     }
-    free(stubs);
 }

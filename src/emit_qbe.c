@@ -1,4 +1,5 @@
 #include "ir.h"
+#include "arena.h"
 #include <ctype.h>
 
 // QBE emitter: IR → QBE IL text
@@ -28,16 +29,11 @@ static const char *qbe_itype(IRType type) {
 // Sanitize a name for QBE: replace non-alphanumeric/underscore chars
 static char *qbe_sanitize(const char *name) {
     int len = strlen(name);
-    char *result = malloc(len + 1);
+    char *result = arena_strdup(&g_arena_scratch, name);
     for (int i = 0; i < len; i++) {
-        char c = name[i];
-        if (isalnum(c) || c == '_') {
-            result[i] = c;
-        } else {
-            result[i] = '_';
-        }
+        char c = result[i];
+        if (!isalnum(c) && c != '_') result[i] = '_';
     }
-    result[len] = '\0';
     return result;
 }
 
@@ -60,7 +56,6 @@ static void emit_qbe_operand(IROperand *op, FILE *out) {
         case OP_GLOBAL: {
             char *s = qbe_sanitize(op->global);
             fprintf(out, "$%s", s);
-            free(s);
             break;
         }
     }
@@ -189,7 +184,6 @@ static void emit_qbe_instr(IRInstr *instr, FILE *out, IRProgram *prog) {
                 // QBE's own '...' calling convention is not the Apple ABI.
                 char *fname = qbe_sanitize(instr->args[0].global);
                 fprintf(out, "$%s_stub(", fname);
-                free(fname);
             } else {
                 emit_qbe_operand(&instr->args[0], out);
                 fprintf(out, "(");
@@ -246,10 +240,9 @@ static void emit_qbe_string_global(const char *name, const char *value, FILE *ou
     if (v[0] == '"' && strlen(v) > 1 && v[strlen(v)-1] == '"') {
         v++;
         // Use strndup-like approach
-        char *stripped = strdup(v);
+        char *stripped = arena_strdup(&g_arena_scratch, v);
         stripped[strlen(stripped)-1] = '\0';
         fprintf(out, "data $%s = { b \"%s\", b 0 }\n", name, stripped);
-        free(stripped);
     } else {
         fprintf(out, "data $%s = { b \"%s\", b 0 }\n", name, v);
     }
@@ -276,10 +269,11 @@ static void emit_qbe_function(IRFunction *fn, FILE *out, IRProgram *prog) {
     }
 
     fprintf(out, "}\n\n");
-    free(fname);
 }
 
 void emit_qbe(IRProgram *prog, FILE *out) {
+    arena_reset(&g_arena_scratch);
+
     // Emit global data (skip struct type definitions)
     for (int i = 0; i < prog->num_globals; i++) {
         if (prog->globals[i].is_struct) continue; // skip struct type metadata
@@ -308,7 +302,6 @@ void emit_qbe(IRProgram *prog, FILE *out) {
             fprintf(out, "%sdata $%s = { l %ld }\n",
                     exp, gname, (long)prog->globals[i].value);
         }
-        free(gname);
     }
 
     // Emit function-local string literals as global data (before functions)

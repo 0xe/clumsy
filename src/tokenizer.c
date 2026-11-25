@@ -1,4 +1,5 @@
 #include "tokenizer.h"
+#include "arena.h"
 #include <ctype.h>
 
 static const char *keywords[] = {
@@ -54,40 +55,29 @@ bool is_whitespace(char c) {
 Token create_token(TokenType type, const char *value, int line, int column) {
     Token token;
     token.type = type;
-    token.value = value ? strdup(value) : NULL;
+    token.value = value ? arena_strdup(&g_arena_compile, value) : NULL;
     token.line = line;
     token.column = column;
     return token;
 }
 
 void free_token(Token *token) {
-    if (token->value) {
-        free(token->value);
-        token->value = NULL;
-    }
+    (void)token;
 }
 
 void token_array_add(TokenArray *array, Token token) {
     if (array->count >= array->capacity) {
-        array->capacity = array->capacity == 0 ? 16 : array->capacity * 2;
-        array->tokens = realloc(array->tokens, array->capacity * sizeof(Token));
-        if (!array->tokens) {
-            fprintf(stderr, "Error: Failed to allocate memory for tokens\n");
-            exit(1);
-        }
+        size_t old_capacity = array->capacity;
+        array->capacity = old_capacity == 0 ? 16 : old_capacity * 2;
+        array->tokens = arena_grow(&g_arena_compile, array->tokens,
+                                   old_capacity * sizeof(Token),
+                                   array->capacity * sizeof(Token));
     }
     array->tokens[array->count++] = token;
 }
 
 TokenArray *tokenize(const char *source) {
-    TokenArray *tokens = malloc(sizeof(TokenArray));
-    if (!tokens) {
-        fprintf(stderr, "Error: Failed to allocate memory for token array\n");
-        exit(1);
-    }
-    tokens->tokens = NULL;
-    tokens->count = 0;
-    tokens->capacity = 0;
+    TokenArray *tokens = arena_calloc(&g_arena_compile, 1, sizeof(TokenArray));
 
     int line = 1;
     int column = 1;
@@ -113,12 +103,11 @@ TokenArray *tokenize(const char *source) {
                 idx++;
             }
             int comment_len = idx - start_idx;
-            char *comment = malloc(comment_len + 1);
+            char comment[comment_len + 1];
             strncpy(comment, source + start_idx, comment_len);
             comment[comment_len] = '\0';
-            
+
             token_array_add(tokens, create_token(TOKEN_COMMENT, comment, line, column));
-            free(comment);
             column += comment_len;
             continue;
         }
@@ -180,12 +169,11 @@ TokenArray *tokenize(const char *source) {
             }
             
             int str_len = idx - start_idx;
-            char *str_value = malloc(str_len + 1);
+            char str_value[str_len + 1];
             strncpy(str_value, source + start_idx, str_len);
             str_value[str_len] = '\0';
-            
+
             token_array_add(tokens, create_token(TOKEN_STRING, str_value, line, column - str_len));
-            free(str_value);
             continue;
         }
 
@@ -233,12 +221,11 @@ TokenArray *tokenize(const char *source) {
             }
 
             int num_len = idx - start_idx;
-            char *num_str = malloc(num_len + 1);
+            char num_str[num_len + 1];
             strncpy(num_str, source + start_idx, num_len);
             num_str[num_len] = '\0';
 
             token_array_add(tokens, create_token(TOKEN_INT, num_str, line, column - num_len));
-            free(num_str);
             continue;
         }
 
@@ -260,12 +247,11 @@ TokenArray *tokenize(const char *source) {
             }
 
             int num_len = idx - start_idx;
-            char *num_str = malloc(num_len + 1);
+            char num_str[num_len + 1];
             strncpy(num_str, source + start_idx, num_len);
             num_str[num_len] = '\0';
 
             token_array_add(tokens, create_token(TOKEN_INT, num_str, line, column - num_len));
-            free(num_str);
             continue;
         }
 
@@ -273,17 +259,16 @@ TokenArray *tokenize(const char *source) {
         bool found_operator = false;
         for (int op_len = 2; op_len >= 1 && !found_operator; op_len--) {
             if (idx + op_len <= len) {
-                char *potential_op = malloc(op_len + 1);
+                char potential_op[op_len + 1];
                 strncpy(potential_op, source + idx, op_len);
                 potential_op[op_len] = '\0';
-                
+
                 if (is_operator(potential_op)) {
                     token_array_add(tokens, create_token(TOKEN_OPERATOR, potential_op, line, column));
                     column += op_len;
                     idx += op_len;
                     found_operator = true;
                 }
-                free(potential_op);
             }
         }
         if (found_operator) {
@@ -299,13 +284,12 @@ TokenArray *tokenize(const char *source) {
             }
             
             int id_len = idx - start_idx;
-            char *identifier = malloc(id_len + 1);
+            char identifier[id_len + 1];
             strncpy(identifier, source + start_idx, id_len);
             identifier[id_len] = '\0';
-            
+
             TokenType type = is_keyword(identifier) ? TOKEN_KEYWORD : TOKEN_IDENTIFIER;
             token_array_add(tokens, create_token(type, identifier, line, column - id_len));
-            free(identifier);
             continue;
         }
 
@@ -329,11 +313,5 @@ TokenArray *tokenize(const char *source) {
 }
 
 void free_token_array(TokenArray *tokens) {
-    if (tokens) {
-        for (size_t i = 0; i < tokens->count; i++) {
-            free_token(&tokens->tokens[i]);
-        }
-        free(tokens->tokens);
-        free(tokens);
-    }
+    (void)tokens;
 }
