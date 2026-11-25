@@ -103,8 +103,8 @@ TokenArray *tokenize(const char *source) {
                 idx++;
             }
             int comment_len = idx - start_idx;
-            char comment[comment_len + 1];
-            strncpy(comment, source + start_idx, comment_len);
+            char *comment = arena_alloc(&g_arena_compile, comment_len + 1);
+            memcpy(comment, source + start_idx, comment_len);
             comment[comment_len] = '\0';
 
             token_array_add(tokens, create_token(TOKEN_COMMENT, comment, line, column));
@@ -169,8 +169,8 @@ TokenArray *tokenize(const char *source) {
             }
             
             int str_len = idx - start_idx;
-            char str_value[str_len + 1];
-            strncpy(str_value, source + start_idx, str_len);
+            char *str_value = arena_alloc(&g_arena_compile, str_len + 1);
+            memcpy(str_value, source + start_idx, str_len);
             str_value[str_len] = '\0';
 
             token_array_add(tokens, create_token(TOKEN_STRING, str_value, line, column - str_len));
@@ -221,8 +221,8 @@ TokenArray *tokenize(const char *source) {
             }
 
             int num_len = idx - start_idx;
-            char num_str[num_len + 1];
-            strncpy(num_str, source + start_idx, num_len);
+            char *num_str = arena_alloc(&g_arena_compile, num_len + 1);
+            memcpy(num_str, source + start_idx, num_len);
             num_str[num_len] = '\0';
 
             token_array_add(tokens, create_token(TOKEN_INT, num_str, line, column - num_len));
@@ -247,8 +247,8 @@ TokenArray *tokenize(const char *source) {
             }
 
             int num_len = idx - start_idx;
-            char num_str[num_len + 1];
-            strncpy(num_str, source + start_idx, num_len);
+            char *num_str = arena_alloc(&g_arena_compile, num_len + 1);
+            memcpy(num_str, source + start_idx, num_len);
             num_str[num_len] = '\0';
 
             token_array_add(tokens, create_token(TOKEN_INT, num_str, line, column - num_len));
@@ -259,8 +259,8 @@ TokenArray *tokenize(const char *source) {
         bool found_operator = false;
         for (int op_len = 2; op_len >= 1 && !found_operator; op_len--) {
             if (idx + op_len <= len) {
-                char potential_op[op_len + 1];
-                strncpy(potential_op, source + idx, op_len);
+                char potential_op[3];
+                memcpy(potential_op, source + idx, op_len);
                 potential_op[op_len] = '\0';
 
                 if (is_operator(potential_op)) {
@@ -284,8 +284,8 @@ TokenArray *tokenize(const char *source) {
             }
             
             int id_len = idx - start_idx;
-            char identifier[id_len + 1];
-            strncpy(identifier, source + start_idx, id_len);
+            char *identifier = arena_alloc(&g_arena_compile, id_len + 1);
+            memcpy(identifier, source + start_idx, id_len);
             identifier[id_len] = '\0';
 
             TokenType type = is_keyword(identifier) ? TOKEN_KEYWORD : TOKEN_IDENTIFIER;

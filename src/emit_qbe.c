@@ -1,6 +1,6 @@
 #include "ir.h"
 #include "arena.h"
-#include <ctype.h>
+#include "emit_common.h"
 
 // QBE emitter: IR → QBE IL text
 //
@@ -17,6 +17,11 @@
 //   cultl, cugtl, culel, cugel (unsigned comparisons)
 //   Result type is w (32-bit), operands can be w or l
 
+typedef struct {
+    IRIndex index;
+    int cmp_counter;
+} QBEEmitter;
+
 // QBE type for the =TYPE annotation on instructions
 static const char *qbe_itype(IRType type) {
     switch (type) {
@@ -24,17 +29,6 @@ static const char *qbe_itype(IRType type) {
         case IR_TYPE_PTR: return "l";
         default: return "w";
     }
-}
-
-// Sanitize a name for QBE: replace non-alphanumeric/underscore chars
-static char *qbe_sanitize(const char *name) {
-    int len = strlen(name);
-    char *result = arena_strdup(&g_arena_scratch, name);
-    for (int i = 0; i < len; i++) {
-        char c = result[i];
-        if (!isalnum(c) && c != '_') result[i] = '_';
-    }
-    return result;
 }
 
 static const char *qbe_type_name(IRType type) {
@@ -54,7 +48,7 @@ static void emit_qbe_operand(IROperand *op, FILE *out) {
         case OP_VREG: fprintf(out, "%s", op->reg); break;
         case OP_BLOCK: fprintf(out, "@%s", op->block); break;
         case OP_GLOBAL: {
-            char *s = qbe_sanitize(op->global);
+            char *s = emit_sanitize(op->global);
             fprintf(out, "$%s", s);
             break;
         }
@@ -74,7 +68,7 @@ static const char *qbe_cmp_opcode(IROpcode op) {
     }
 }
 
-static void emit_qbe_instr(IRInstr *instr, FILE *out, IRProgram *prog) {
+static void emit_qbe_instr(QBEEmitter *e, IRInstr *instr, FILE *out, IRProgram *prog) {
     switch (instr->op) {
         case IR_ADD: case IR_SUB: case IR_MUL: case IR_DIV:
         case IR_AND: case IR_OR: case IR_XOR: case IR_SHL: case IR_SHR:
@@ -110,16 +104,15 @@ static void emit_qbe_instr(IRInstr *instr, FILE *out, IRProgram *prog) {
         case IR_EQ: case IR_NE: case IR_LT: case IR_GT: case IR_LE: case IR_GE: {
             // QBE comparisons produce w (32-bit) results.
             // We use a temp w register, then extend to l.
-            static int cmp_counter = 0;
+            int cmp_id = e->cmp_counter++;
             const char *cmp_op = qbe_cmp_opcode(instr->op);
-            fprintf(out, "%%_cmp_%d =w %s ", cmp_counter, cmp_op);
+            fprintf(out, "%%_cmp_%d =w %s ", cmp_id, cmp_op);
             emit_qbe_operand(&instr->args[0], out);
             fprintf(out, ", ");
             emit_qbe_operand(&instr->args[1], out);
             fprintf(out, "\n\t");
             emit_qbe_operand(&instr->dest, out);
-            fprintf(out, " =l extsw %%_cmp_%d", cmp_counter);
-            cmp_counter++;
+            fprintf(out, " =l extsw %%_cmp_%d", cmp_id);
             break;
         }
 
@@ -182,7 +175,7 @@ static void emit_qbe_instr(IRInstr *instr, FILE *out, IRProgram *prog) {
             if (variadic) {
                 // Variadic calls go through a fixed-arity stub (see stubs.c);
                 // QBE's own '...' calling convention is not the Apple ABI.
-                char *fname = qbe_sanitize(instr->args[0].global);
+                char *fname = emit_sanitize(instr->args[0].global);
                 fprintf(out, "$%s_stub(", fname);
             } else {
                 emit_qbe_operand(&instr->args[0], out);
@@ -235,22 +228,14 @@ static void emit_qbe_instr(IRInstr *instr, FILE *out, IRProgram *prog) {
 
 // Emit a global string literal (top-level)
 static void emit_qbe_string_global(const char *name, const char *value, FILE *out) {
-    // Strip surrounding quotes if present
-    const char *v = value;
-    if (v[0] == '"' && strlen(v) > 1 && v[strlen(v)-1] == '"') {
-        v++;
-        // Use strndup-like approach
-        char *stripped = arena_strdup(&g_arena_scratch, v);
-        stripped[strlen(stripped)-1] = '\0';
-        fprintf(out, "data $%s = { b \"%s\", b 0 }\n", name, stripped);
-    } else {
-        fprintf(out, "data $%s = { b \"%s\", b 0 }\n", name, v);
-    }
+    int len;
+    const char *body = emit_unquote(value, &len);
+    fprintf(out, "data $%s = { b \"%.*s\", b 0 }\n", name, len, body);
 }
 
-static void emit_qbe_function(IRFunction *fn, FILE *out, IRProgram *prog) {
+static void emit_qbe_function(QBEEmitter *e, IRFunction *fn, FILE *out, IRProgram *prog) {
     if (fn->is_public) fprintf(out, "export ");
-    char *fname = qbe_sanitize(fn->name);
+    char *fname = emit_sanitize(fn->name);
     fprintf(out, "function %s $%s(", qbe_type_name(fn->return_type), fname);
     for (int i = 0; i < fn->num_params; i++) {
         if (i > 0) fprintf(out, ", ");
@@ -263,7 +248,7 @@ static void emit_qbe_function(IRFunction *fn, FILE *out, IRProgram *prog) {
         fprintf(out, "@%s\n", b->label);
         for (int j = 0; j < b->num_instrs; j++) {
             fprintf(out, "\t");
-            emit_qbe_instr(&b->instrs[j], out, prog);
+            emit_qbe_instr(e, &b->instrs[j], out, prog);
             fprintf(out, "\n");
         }
     }
@@ -274,11 +259,15 @@ static void emit_qbe_function(IRFunction *fn, FILE *out, IRProgram *prog) {
 void emit_qbe(IRProgram *prog, FILE *out) {
     arena_reset(&g_arena_scratch);
 
+    QBEEmitter emitter;
+    emitter.cmp_counter = 0;
+    ir_index_init(&emitter.index, prog, &g_arena_scratch);
+
     // Emit global data (skip struct type definitions)
     for (int i = 0; i < prog->num_globals; i++) {
         if (prog->globals[i].is_struct) continue; // skip struct type metadata
         if (prog->globals[i].is_extern) continue; // skip extern declarations (no data)
-        char *gname = qbe_sanitize(prog->globals[i].name);
+        char *gname = emit_sanitize(prog->globals[i].name);
         const char *exp = prog->globals[i].is_public ? "export " : "";
         if (prog->globals[i].is_string) {
             fprintf(out, "%s", exp);
@@ -316,6 +305,6 @@ void emit_qbe(IRProgram *prog, FILE *out) {
     if (prog->num_globals > 0 || prog->num_functions > 0) fprintf(out, "\n");
 
     for (int i = 0; i < prog->num_functions; i++) {
-        emit_qbe_function(prog->functions[i], out, prog);
+        emit_qbe_function(&emitter, prog->functions[i], out, prog);
     }
 }

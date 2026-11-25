@@ -15,22 +15,32 @@ set(COMPILER_SOURCES
     src/arena.c
     src/tokenizer.c
     src/parser.c
+    src/symbol_table.c
     src/compiler.c
     src/ir.c
     src/ir_build.c
     src/emit_qbe.c
     src/emit_llvm.c
     src/emit_cranelift.c
+    src/emit_common.c
+    src/hashmap.c
     src/stubs.c
     src/cfg.c
 )
 
 set(COMPILER_HEADERS
     src/arena.h
+    src/vec.h
+    src/hashmap.h
+    src/token.h
+    src/ast.h
+    src/symbol.h
     src/types.h
     src/tokenizer.h
     src/parser.h
+    src/symbol_table.h
     src/compiler.h
+    src/emit_common.h
     src/ir.h
     src/cfg.h
 )

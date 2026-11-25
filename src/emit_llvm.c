@@ -1,6 +1,6 @@
 #include "ir.h"
 #include "arena.h"
-#include <ctype.h>
+#include "emit_common.h"
 
 // LLVM IR emitter: IR → LLVM IR text
 //
@@ -22,18 +22,8 @@
 typedef struct {
     FILE *out;
     int temp_counter;
+    IRIndex index;
 } LLVMEmitter;
-
-// Sanitize a name for LLVM: replace chars outside [a-zA-Z0-9_$.-] with '_'
-static char *llvm_sanitize(const char *name) {
-    int len = strlen(name);
-    char *result = arena_strdup(&g_arena_scratch, name);
-    for (int i = 0; i < len; i++) {
-        char c = result[i];
-        if (!isalnum(c) && c != '_' && c != '$' && c != '.' && c != '-') result[i] = '_';
-    }
-    return result;
-}
 
 // LLVM type for an IR value (pointers are addresses in our model)
 static const char *llvm_value_type(IRType type) {
@@ -51,12 +41,12 @@ static void emit_operand(IROperand *op, FILE *out) {
         case OP_REGISTER: fprintf(out, "%%%s", op->reg); break;
         case OP_VREG: fprintf(out, "%s", op->reg); break;
         case OP_BLOCK: {
-            char *s = llvm_sanitize(op->block);
+            char *s = emit_sanitize_llvm(op->block);
             fprintf(out, "%%%s", s);
             break;
         }
         case OP_GLOBAL: {
-            char *s = llvm_sanitize(op->global);
+            char *s = emit_sanitize_llvm(op->global);
             fprintf(out, "@%s", s);
             break;
         }
@@ -77,22 +67,6 @@ static void emit_ptr_operand(LLVMEmitter *e, IROperand *op, char *buf, int buf_s
     fprintf(out, "%s = inttoptr i64 ", buf);
     emit_operand(op, out);
     fprintf(out, " to ptr");
-}
-
-// Resolve the callee signature for a call: index into prog->externs or
-// prog->functions, or -1 if unknown.
-static int find_extern(IRProgram *prog, const char *name) {
-    for (int i = 0; i < prog->num_externs; i++) {
-        if (strcmp(prog->externs[i].name, name) == 0) return i;
-    }
-    return -1;
-}
-
-static int find_function(IRProgram *prog, const char *name) {
-    for (int i = 0; i < prog->num_functions; i++) {
-        if (strcmp(prog->functions[i]->name, name) == 0) return i;
-    }
-    return -1;
 }
 
 static const char *llvm_binop(IROpcode op) {
@@ -236,8 +210,8 @@ static void emit_llvm_instr(LLVMEmitter *e, IRInstr *instr, IRProgram *prog) {
 
         case IR_CALL: {
             const char *func_name = instr->args[0].global;
-            int ex = find_extern(prog, func_name);
-            int fni = find_function(prog, func_name);
+            int ex = ir_index_extern(&e->index, func_name);
+            int fni = ir_index_function(&e->index, func_name);
             int nparams = 0;
             bool is_extern = false;
 
@@ -365,90 +339,14 @@ static void emit_llvm_instr(LLVMEmitter *e, IRInstr *instr, IRProgram *prog) {
     }
 }
 
-// Decode the next byte at v[i]. If v[i] is the start of a C escape sequence
-// (the IR stores source escapes verbatim, e.g. "\n" as two chars), decode it
-// into one byte. Returns the index of the next byte.
-static int decode_llvm_byte(const char *v, int len, int i, unsigned char *out) {
-    unsigned char c = v[i];
-    if (c == '\\' && i + 1 < len) {
-        char e = v[i + 1];
-        int next = i + 2;
-        switch (e) {
-            case 'n': *out = '\n'; return next;
-            case 't': *out = '\t'; return next;
-            case 'r': *out = '\r'; return next;
-            case 'a': *out = '\a'; return next;
-            case 'b': *out = '\b'; return next;
-            case 'f': *out = '\f'; return next;
-            case 'v': *out = '\v'; return next;
-            case '\\': *out = '\\'; return next;
-            case '"': *out = '"'; return next;
-            case '\'': *out = '\''; return next;
-            case 'x': {
-                int val = 0, have = 0;
-                while (next < len && isxdigit((unsigned char)v[next])) {
-                    val = val * 16 + (isdigit((unsigned char)v[next])
-                                          ? v[next] - '0'
-                                          : tolower((unsigned char)v[next]) - 'a' + 10);
-                    next++;
-                    have = 1;
-                }
-                *out = have ? (unsigned char)val : 'x';
-                return next;
-            }
-            default: {
-                // Octal: up to 3 digits
-                int val = 0, have = 0;
-                if (e >= '0' && e <= '7') {
-                    val = e - '0';
-                    have = 1;
-                    while (next < len && have < 3 && v[next] >= '0' && v[next] <= '7') {
-                        val = val * 8 + (v[next] - '0');
-                        next++;
-                        have++;
-                    }
-                }
-                *out = have ? (unsigned char)val : (unsigned char)e;
-                return next;
-            }
-        }
-    }
-    *out = c;
-    return i + 1;
-}
-
-// Byte count of a string after decoding C escapes, +1 for the NUL terminator.
-static int decoded_string_byte_len(const char *value) {
-    const char *v = value;
-    int len = strlen(value);
-    if (len >= 2 && v[0] == '"' && v[len - 1] == '"') {
-        v++;
-        len -= 2;
-    }
-    int n = 0;
-    for (int i = 0; i < len;) {
-        unsigned char byte;
-        i = decode_llvm_byte(v, len, i, &byte);
-        n++;
-    }
-    return n + 1;
-}
-
-// Emit a string literal as an explicit byte array. LLVM's c"..." escape
-// support is limited (no \n/\t/\x, octal capped at 2 digits), so C escapes
-// in the IR text are decoded to bytes and emitted as "i8 N" values.
 static void emit_llvm_string_bytes(const char *value, FILE *out) {
-    const char *v = value;
-    int len = strlen(value);
-    if (len >= 2 && v[0] == '"' && v[len - 1] == '"') {
-        v++;
-        len -= 2;
-    }
+    int len;
+    const char *body = emit_unquote(value, &len);
     fprintf(out, "[");
     bool first = true;
     for (int i = 0; i < len;) {
         unsigned char byte;
-        i = decode_llvm_byte(v, len, i, &byte);
+        i = emit_decode_byte(body, len, i, &byte);
         if (!first) fprintf(out, ", ");
         first = false;
         fprintf(out, "i8 %u", (unsigned)byte);
@@ -459,8 +357,8 @@ static void emit_llvm_string_bytes(const char *value, FILE *out) {
 
 static void emit_llvm_string_global(const char *name, const char *value,
                                     const char *linkage, FILE *out) {
-    char *n = llvm_sanitize(name);
-    fprintf(out, "@%s = %sconstant [%d x i8] ", n, linkage, decoded_string_byte_len(value));
+    char *n = emit_sanitize_llvm(name);
+    fprintf(out, "@%s = %sconstant [%d x i8] ", n, linkage, emit_string_byte_count(value));
     emit_llvm_string_bytes(value, out);
     fprintf(out, "\n");
 }
@@ -471,7 +369,7 @@ static void emit_llvm_function(LLVMEmitter *e, IRFunction *fn, IRProgram *prog) 
     if (!fn->is_public) fprintf(out, "internal ");
     fprintf(out, "%s @", llvm_value_type(fn->return_type));
     {
-        char *n = llvm_sanitize(fn->name);
+        char *n = emit_sanitize_llvm(fn->name);
         fprintf(out, "%s", n);
     }
     fprintf(out, "(");
@@ -483,7 +381,7 @@ static void emit_llvm_function(LLVMEmitter *e, IRFunction *fn, IRProgram *prog) 
 
     for (int i = 0; i < fn->num_blocks; i++) {
         IRBlock *b = fn->blocks[i];
-        char *n = llvm_sanitize(b->label);
+        char *n = emit_sanitize_llvm(b->label);
         fprintf(out, "%s:\n", n);
         for (int j = 0; j < b->num_instrs; j++) {
             emit_llvm_instr(e, &b->instrs[j], prog);
@@ -495,6 +393,10 @@ static void emit_llvm_function(LLVMEmitter *e, IRFunction *fn, IRProgram *prog) 
 
 void emit_llvm(IRProgram *prog, FILE *out) {
     arena_reset(&g_arena_scratch);
+
+    LLVMEmitter e = {0};
+    e.out = out;
+    ir_index_init(&e.index, prog, &g_arena_scratch);
 
     // Extern function declarations. All values are i64 in the IR model, so
     // externs are declared all-i64 regardless of their C signature (ARM64
@@ -522,7 +424,7 @@ void emit_llvm(IRProgram *prog, FILE *out) {
     }
 
     // Undeclared printf (print/println builtin) needs its stub declared
-    if (find_extern(prog, "printf") < 0 && !printf_stub_declared) {
+    if (ir_index_extern(&e.index, "printf") < 0 && !printf_stub_declared) {
         bool uses_printf = false;
         for (int i = 0; i < prog->num_functions && !uses_printf; i++) {
             IRFunction *fn = prog->functions[i];
@@ -540,12 +442,12 @@ void emit_llvm(IRProgram *prog, FILE *out) {
             fprintf(out, "declare i64 @printf_stub(i64, i64, i64, i64, i64, i64, i64, i64)\n");
         }
     }
-    if (prog->num_externs > 0 || find_extern(prog, "printf") < 0) fprintf(out, "\n");
+    if (prog->num_externs > 0 || ir_index_extern(&e.index, "printf") < 0) fprintf(out, "\n");
 
     // Global data (skip struct type metadata)
     for (int i = 0; i < prog->num_globals; i++) {
         if (prog->globals[i].is_struct) continue;
-        char *gname = llvm_sanitize(prog->globals[i].name);
+        char *gname = emit_sanitize_llvm(prog->globals[i].name);
 
         if (prog->globals[i].is_extern) {
             // Extern variable: emit a declaration only when this module does
@@ -598,7 +500,6 @@ void emit_llvm(IRProgram *prog, FILE *out) {
     if (total_strings > 0) fprintf(out, "\n");
 
     // Functions
-    LLVMEmitter e = {out, 0};
     for (int i = 0; i < prog->num_functions; i++) {
         emit_llvm_function(&e, prog->functions[i], prog);
     }
